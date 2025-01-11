@@ -1,0 +1,51 @@
+POST	/auth/register	Register a new user
+POST	/auth/login	Log in and generate a JWT
+POST	/auth/logout	Log out the user
+POST	/auth/refresh-token	Refresh the JWT
+POST	/auth/verify-email	Verify the user's email using a token
+POST	/auth/resend-verification-email	Resend the email verification token
+POST	/auth/forgot-password	Initiate password reset
+POST	/auth/reset-password	Reset the password using the token
+POST	/auth/change-password	Change the current password
+POST	/auth/account-recovery	Helps users recover accounts without email access
+POST	/auth/enable-2fa	Enable two-factor authentication
+POST	/auth/verify-2fa	Verify the 2FA code during login
+GET	/users/me	Get the logged-in user's profile
+PUT	/users/me	Update the logged-in user's profile
+DELETE	/users/me	Soft delete the user's account
+GET	/users/me/tenants	Get all tenants associated with the logged-in user
+POST	/users/me/tenants	Associate the logged-in user with a tenant
+DELETE	/users/me/tenants/:tenantId	Remove the logged-in user's association with a tenant
+GET	/users/me/preferences	Get the logged-in user's preferences
+PUT	/users/me/preferences	Update the logged-in user's preferences
+PUT	/users/me/notifications	Update notification settings
+GET	/users/me/security-settings	Control security settings (e.g., session timeout)
+GET	/users	Get a list of all users (admin only)
+GET	/users/search	Search users by criteria like name, email, or role
+GET	/users/:id	Get details of a specific user
+PUT	/users/:id	Update a user's profile
+DELETE	/users/:id	Soft delete or permanently delete a user
+GET	/users/:id/roles	Fetch roles for a user, scoped by tenant or globally
+PUT	/users/:id/roles	Assign or update roles for a user
+GET	/users/:id/audit-logs	Tracks changes for auditing or debugging purposes
+GET	/users/:id/login-history	Admin view of a user's login history
+GET	/users/analytics	Fetch aggregate data on users (e.g., active users)
+GET	/tenants/:tenantId/users	Fetch all users associated with a tenant
+POST	/tenants/:tenantId/users	Add a user to a tenant
+DELETE	/tenants/:tenantId/users/:userId	Remove a user from a tenant
+GET	/roles	Get a list of available roles
+POST	/roles	Create a new role
+PUT	/roles/:id	Update a role's permissions
+DELETE	/roles/:id	Delete a role
+GET	/users/me/connected-services	Shows users which third-party services they’ve connected
+DELETE	/users/me/connected-services/:serviceId	Disconnect a specific service
+GET	/health	System health check
+
+
+controllers/
+  authController.js
+  userController.js
+  adminController.js
+  tenantController.js
+  roleController.js
+  systemController.js
