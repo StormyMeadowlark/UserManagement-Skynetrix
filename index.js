@@ -7,6 +7,7 @@ const config = require("./config"); // Centralized config
 const connectDB = require("./config/db");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swaggerConfig");
+const authRoutes = require("./routes/authRoutes");
 
 // Initialize Express
 const app = express();
@@ -19,8 +20,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// MongoDB Connection
-connectDB();
+// MongoDB Connection - Skip in Test Mode
+if (process.env.NODE_ENV !== "test") {
+  connectDB();
+}
 
 // API Versioning
 const API_BASE = "/api/v2";
@@ -29,7 +32,6 @@ app.use(
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec)
 );
-
 
 // Test Route
 app.get("/", (req, res) => {
@@ -40,6 +42,9 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "Healthy", timestamp: new Date() });
 });
+
+// Authentication Routes
+app.use(`${API_BASE}/auth`, authRoutes);
 
 // Centralized Error Handling
 app.use((err, req, res, next) => {
