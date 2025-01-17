@@ -63,8 +63,8 @@ const userSchema = new mongoose.Schema(
     },
     verification: {
       isEmailVerified: { type: Boolean, default: false },
-      verifyEmailToken: { type: String },
-      verifyEmailExpires: { type: Date },
+      verifyEmailToken: { type: String, default: null },
+      verifyEmailExpires: { type: Date, default: null },
     },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret: { type: String },
@@ -93,13 +93,8 @@ const userSchema = new mongoose.Schema(
 // Hash the password before saving
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-
-  try {
-    this.password = await bcrypt.hash(this.password, 10);
-    next();
-  } catch (err) {
-    next(err);
-  }
+  this.password = await bcrypt.hash(this.password, 10);
+  next();
 });
 
 // Add method to compare passwords

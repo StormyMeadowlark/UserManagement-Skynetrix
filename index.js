@@ -51,18 +51,19 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
 
   if (err.name === "ValidationError") {
-    return res.status(400).json({ error: err.message });
+    return res.status(400).json({ message: err.message }); // Use 'message'
   }
 
   if (err.name === "UnauthorizedError") {
-    return res.status(401).json({ error: "Unauthorized" });
+    return res.status(401).json({ message: "Unauthorized" }); // Use 'message'
   }
 
   res.status(err.status || 500).json({
-    error: err.message || "Internal Server Error",
+    message: err.message || "Internal Server Error", // Use 'message'
     stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
   });
 });
+
 
 // Start Server Only When Not in Test Mode
 if (require.main === module) {

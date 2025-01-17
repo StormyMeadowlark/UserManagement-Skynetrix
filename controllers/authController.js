@@ -1,9 +1,13 @@
 const User = require("../models/userModel");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 const { authenticator } = require("otplib");
 const { sendEmail } = require("../utils/email");
 const { loadTemplate } = require("../utils/templateLoader");
+
+
+
 
 
 
@@ -80,44 +84,37 @@ exports.register = async (req, res) => {
   }
 };
 
-
-// Log in and generate a JWT
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
 
-    if (user.accountLockedUntil && user.accountLockedUntil > Date.now()) {
+    if (!email && !password) {
       return res
-        .status(403)
-        .json({ message: "Account locked. Try again later." });
+        .status(400)
+        .json({ message: "Email and password are required." });
     }
 
-    if (!user || !(await user.comparePassword(password))) {
-      user.failedLoginAttempts += 1;
-
-      if (user.failedLoginAttempts >= 5) {
-        user.accountLockedUntil = Date.now() + 15 * 60 * 1000; // Lock for 15 minutes
-      }
-
-      await user.save();
+    const user = await User.findOne({ email });
+    if (!user) {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
-    user.failedLoginAttempts = 0;
-    user.accountLockedUntil = null;
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid credentials." });
+    }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN,
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1d",
     });
 
-    await user.save();
-    res.status(200).json({ token });
+    return res.status(200).json({ message: "Login successful", token });
   } catch (error) {
-    console.error("Error logging in:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("Login error:", error);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
+
 
 // Log out the user
 exports.logout = (req, res) => {
@@ -224,7 +221,6 @@ exports.resendVerificationEmail = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
-
 
 // Forgot Password
 exports.forgotPassword = async (req, res) => {

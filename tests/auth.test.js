@@ -20,7 +20,7 @@ describe("Auth API Endpoints with SendGrid", () => {
 
   it("should register a new user and send an email", async () => {
     const userData = {
-      email: "herken.ashlee@gmail.com", // Replace with a valid email
+      email: "testusers@example.com", // Replace with a valid email
       password: "Password123",
       name: "Test User",
       tenantDomain: "skynetrix.tech",
@@ -43,7 +43,7 @@ describe("Auth API Endpoints with SendGrid", () => {
 
     // Create a user with a verification token
     const user = await User.create({
-      email: "herken.ashlee@gmail.com",
+      email: "testusers@example.com",
       password: "Password123",
       name: "Test User",
       tenantDomain: "skynetrix.tech",
@@ -109,4 +109,5 @@ describe("Auth API Endpoints with SendGrid", () => {
     expect(response.status).toBe(400);
     expect(response.body.message).toBe("Verification token is required.");
   });
+
 });
