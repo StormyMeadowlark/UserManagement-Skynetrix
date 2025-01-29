@@ -16,6 +16,31 @@ const userSchema = new mongoose.Schema(
         message: "Invalid email format",
       },
     },
+    phone: {
+      type: String,
+      validate: {
+        validator: function (phone) {
+          return /^\+?[1-9]\d{1,14}$/.test(phone); // E.164 format
+        },
+        message: "Invalid phone number format",
+      },
+    },
+    secondaryPhone: {
+      type: String,
+      validate: {
+        validator: function (phone) {
+          return !phone || /^\+?[1-9]\d{1,14}$/.test(phone); // Optional
+        },
+        message: "Invalid secondary phone number format",
+      },
+    },
+    address: {
+      street: { type: String },
+      city: { type: String },
+      state: { type: String},
+      zipCode: { type: String },
+      country: { type: String },
+    },
     password: {
       type: String,
       required: true,

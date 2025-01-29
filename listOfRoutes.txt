@@ -1,18 +1,23 @@
 controllers/
-  authController.js
-    POST	/auth/register	Register a new user
-    POST	/auth/login	Log in and generate a JWT
-    POST	/auth/logout	Log out the user
-    POST	/auth/refresh-token	Refresh the JWT
-    POST	/auth/verify-email	Verify the user's email using a token
-    POST	/auth/resend-verification-email	Resend the email verification token
-    POST	/auth/forgot-password	Initiate password reset
-    POST	/auth/reset-password	Reset the password using the token
-    POST	/auth/change-password	Change the current password
-    POST	/auth/account-recovery	Helps users recover accounts without email access
-    POST	/auth/enable-2fa	Enable two-factor authentication
-    POST	/auth/verify-2fa	Verify the 2FA code during login
+  STARTED authController.js
+    COMPLETE  POST	/auth/register	Register a new user
+    COMPLETE  POST	/auth/login	Log in and generate a JWT
+    COMPLETE  POST	/auth/logout	Log out the user
+    COMPLETE  POST	/auth/refresh-token	Refresh the JWT
+    COMPLETE  POST	/auth/change-password	Change the current password
+    COMPLETE  POST	/auth/verify-email	Verify the user's email using a token
+    COMPLETE  POST	/auth/resend-verification-email	Resend the email verification token
+    COMPLETE  POST	/auth/forgot-password	Initiate password reset
+    COMPLETE  POST	/auth/reset-password	Reset the password using the token
 
+
+    STARTED   POST	/auth/account-recovery	Helps users recover accounts without email access
+    POSTPONE  POST  /auth/initiate-account-recovery	Starts the account recovery process
+    POSTPONE  POST  /auth/verify-account-recovery	Verifys the account recovery process
+    POSTPONE  POST	/auth/enable-2fa	Enable two-factor authentication
+    POSTPONE  POST	/auth/verify-2fa	Verify the 2FA code during login
+    POSTPONE  POST	/auth/disable-2fa	Disable two-factor authentication
+    POSTPONE  POST  /auth/social-login
 
   userController.js
     GET	/users/me	Get the logged-in user's profile

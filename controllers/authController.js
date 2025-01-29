@@ -5,10 +5,12 @@ const bcrypt = require("bcrypt");
 const { authenticator } = require("otplib");
 const { sendEmail } = require("../utils/email");
 const { loadTemplate } = require("../utils/templateLoader");
+const { OAuth2Client } = require("google-auth-library");
 
 
 
 
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
 // Register a new user
@@ -99,6 +101,12 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
+    if (!user.verification?.isEmailVerified) {
+      return res
+        .status(403)
+        .json({ message: "Please verify your email before logging in." });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials." });
@@ -115,7 +123,6 @@ exports.login = async (req, res) => {
   }
 };
 
-
 // Log out the user
 exports.logout = (req, res) => {
   // For stateless JWT, there's no logout mechanism. Tokens can only be invalidated via expiration or blacklisting.
@@ -130,17 +137,33 @@ exports.refreshToken = async (req, res) => {
       return res.status(400).json({ message: "Refresh token is required." });
     }
 
-    // Verify and generate a new token
+    // Verify the refresh token
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+
+    // Fetch the user associated with the token
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(401).json({ message: "Invalid refresh token." });
+    }
+
+    // Check if the user's email is verified
+    if (!user.verification?.isEmailVerified) {
+      return res
+        .status(403)
+        .json({ message: "Please verify your email to use this feature." });
+    }
+
+    // Generate a new access token
     const newToken = jwt.sign(
-      { id: decoded.id, role: decoded.role, tenantIds: decoded.tenantIds },
+      { id: user._id, role: user.role, tenantIds: user.tenantIds },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
 
-    res
-      .status(200)
-      .json({ message: "Token refreshed successfully.", token: newToken });
+    res.status(200).json({
+      message: "Token refreshed successfully.",
+      token: newToken,
+    });
   } catch (error) {
     console.error("Error refreshing token:", error);
     res.status(401).json({ message: "Invalid or expired refresh token." });
@@ -189,22 +212,28 @@ exports.resendVerificationEmail = async (req, res) => {
       return res.status(400).json({ message: "Email is required." });
     }
 
+    // Check if the email is in a valid format (optional)
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({ message: "Invalid email format." });
+    }
+
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ message: "User not found." });
     }
 
-    if (user.verification.isEmailVerified) {
+    if (user.verification?.isEmailVerified) {
       return res.status(400).json({ message: "Email is already verified." });
     }
 
+    // Generate a new verification token
     const verifyEmailToken = crypto.randomBytes(32).toString("hex");
     user.verification.verifyEmailToken = verifyEmailToken;
     user.verification.verifyEmailExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
     await user.save();
 
-    // Load and send verification email
+    // Load and send the verification email
     const template = loadTemplate("verify-email");
     const emailBody = template
       .replace("{{name}}", user.name)
@@ -221,6 +250,7 @@ exports.resendVerificationEmail = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
 
 // Forgot Password
 exports.forgotPassword = async (req, res) => {
@@ -300,19 +330,37 @@ exports.resetPassword = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
-    const userId = req.user.id; // Assumes the user ID is attached to the req object via middleware
 
+    // Ensure both old and new passwords are provided
+    if (!oldPassword || !newPassword) {
+      return res
+        .status(400)
+        .json({ message: "Both old and new passwords are required." });
+    }
+
+    const userId = req.user.id; // Assumes middleware attaches the user ID to the request
+
+    // Fetch the user from the database
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found." });
     }
 
+    // Check if the old password matches
     const isMatch = await user.comparePassword(oldPassword);
     if (!isMatch) {
       return res.status(400).json({ message: "Old password is incorrect." });
     }
 
-    user.password = newPassword;
+    // Validate new password strength (optional)
+    if (newPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ message: "New password must be at least 6 characters long." });
+    }
+
+    // Update the user's password
+    user.password = newPassword; // Assuming password hashing is handled in the User model's pre-save middleware
     await user.save();
 
     res.status(200).json({ message: "Password changed successfully." });
@@ -401,6 +449,87 @@ exports.verify2FA = async (req, res) => {
     res.status(200).json({ message: "2FA verification successful." });
   } catch (error) {
     console.error("Error verifying 2FA:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.socialLogin = async (req, res) => {
+  try {
+    const { token, provider } = req.body;
+
+    if (provider !== "google") {
+      return res.status(400).json({ message: "Unsupported provider." });
+    }
+
+    // Verify Google token
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { email, name, sub } = payload; // `sub` is the Google user ID
+
+    // Find or create the user
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      user = new User({
+        email,
+        name,
+        password: null, // Social logins don't need a password
+        "verification.isEmailVerified": true,
+        socialId: sub, // Store the Google user ID
+      });
+      await user.save();
+    }
+
+    // Generate a JWT
+    const jwtToken = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    res.status(200).json({
+      message: "Social login successful",
+      token: jwtToken,
+      user: { id: user._id, email: user.email, name: user.name },
+    });
+  } catch (error) {
+    console.error("Social login error:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+
+exports.disable2FA = async (req, res) => {
+  try {
+    const userId = req.user.id; // Assumes user ID is added to `req.user` via middleware after JWT verification
+
+    // Find the user in the database
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // Check if 2FA is already disabled
+    if (!user.twoFactorEnabled) {
+      return res
+        .status(400)
+        .json({ message: "Two-factor authentication is already disabled." });
+    }
+
+    // Disable 2FA by updating the user's profile
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = null; // Remove the 2FA secret, if applicable
+    await user.save();
+
+    res
+      .status(200)
+      .json({ message: "Two-factor authentication has been disabled." });
+  } catch (error) {
+    console.error("Error disabling 2FA:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };

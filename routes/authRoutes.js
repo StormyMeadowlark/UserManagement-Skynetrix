@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
+const { validateToken } = require("../middleware/userValidation");;
 const {
   validateRegister,
   validateLogin,
@@ -18,9 +19,10 @@ router.post(
 );
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
-router.post("/change-password", authController.changePassword);
+router.post("/change-password", validateToken, authController.changePassword);
 router.post("/account-recovery", authController.accountRecovery);
 router.post("/enable-2fa", authController.enable2FA);
 router.post("/verify-2fa", authController.verify2FA);
-
+router.post("/disable-2fa", authController.disable2FA);
+router.post("/social-login", authController.socialLogin);
 module.exports = router;
