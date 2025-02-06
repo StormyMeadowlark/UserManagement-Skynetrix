@@ -37,7 +37,7 @@ const userSchema = new mongoose.Schema(
     address: {
       street: { type: String },
       city: { type: String },
-      state: { type: String},
+      state: { type: String },
       zipCode: { type: String },
       country: { type: String },
     },
@@ -55,6 +55,11 @@ const userSchema = new mongoose.Schema(
     marketing: {
       email: { type: Boolean, default: false },
       sms: { type: Boolean, default: false },
+    },
+    notifications: {
+      email: { type: Boolean, default: false },
+      sms: { type: Boolean, default: false },
+      push: { type: Boolean, default: false },
     },
     vehicles: [
       {

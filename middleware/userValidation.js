@@ -31,10 +31,19 @@ exports.authMiddleware = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
+
+    let user;
+    try {
+      user = await User.findById(decoded.id);
+    } catch (dbError) {
+      console.error("🔥 Database error in authMiddleware:", dbError);
+      return res
+        .status(500)
+        .json({ message: "Authentication failed due to a database error." }); // ✅ FIX: Return 500 if DB fails
+    }
 
     if (!user) {
-      return res.status(404).json({ message: "User not found." }); // 🔥 FIX: Return 404 instead of 401
+      return res.status(404).json({ message: "User not found." });
     }
 
     if (user.status !== "Active") {
@@ -47,9 +56,25 @@ exports.authMiddleware = async (req, res, next) => {
       role: user.role,
       tenantIds: user.tenantIds,
     }; // Attach user info to `req.user`
+
     next();
   } catch (error) {
-    console.error("Token validation error:", error);
+    console.error("❌ Token validation error:", error);
     res.status(401).json({ message: "Unauthorized access." });
   }
+};
+
+exports.adminMiddleware = (req, res, next) => {
+  // Ensure user is authenticated and has a role
+  if (!req.user || !req.user.role) {
+    return res.status(401).json({ message: "Unauthorized access." });
+  }
+
+  // Check if the user is an admin
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admins only." });
+  }
+
+  // If admin, proceed to the next middleware or controller
+  next();
 };
