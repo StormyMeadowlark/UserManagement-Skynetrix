@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt");
 
 const userSchema = new mongoose.Schema(
   {
+    /** 🔹 Basic User Info */
     email: {
       type: String,
       required: true,
@@ -34,24 +35,52 @@ const userSchema = new mongoose.Schema(
         message: "Invalid secondary phone number format",
       },
     },
+    name: { type: String, required: true, trim: true },
+    birthday: { type: Date },
+
+    /** 🔹 Address */
     address: {
-      street: { type: String },
+      addressLine1: { type: String },
+      addressLine2: { type: String },
       city: { type: String },
       state: { type: String },
-      zipCode: { type: String },
+      zip: { type: String },
       country: { type: String },
     },
-    password: {
+
+    /** 🔹 Role & Permissions */
+    role: {
       type: String,
-      required: true,
-      minlength: 6,
+      enum: ["user", "admin", "tenantAdmin"],
+      default: "user",
     },
-    name: {
-      type: String,
-      required: true,
-      trim: true,
+    permissions: [{ type: String }], // Stores specific permissions (e.g., "canManageCustomers", "canViewReports")
+
+    tenantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tenant" }],
+
+    /** 🔹 Shopware Integration */
+    shopwareUserId: { type: String, unique: true, sparse: true }, // Stores Shopware User ID
+    shopwareRole: { type: String }, // Role from Shopware (e.g., "shopAdmin", "serviceAdvisor")
+
+    /** 🔹 Security */
+    password: { type: String, required: true, minlength: 6 },
+    passwordUpdatedAt: { type: Date }, // Tracks last password change
+
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorMethods: [
+      {
+        type: String,
+        enum: ["email", "sms", "app"],
+      },
+    ], // Supports multiple 2FA options
+
+    verification: {
+      isEmailVerified: { type: Boolean, default: false },
+      verifyEmailToken: { type: String, default: null },
+      verifyEmailExpires: { type: Date, default: null },
     },
-    birthday: { type: Date },
+
+    /** 🔹 Notifications & Marketing Preferences */
     marketing: {
       email: { type: Boolean, default: false },
       sms: { type: Boolean, default: false },
@@ -61,28 +90,8 @@ const userSchema = new mongoose.Schema(
       sms: { type: Boolean, default: false },
       push: { type: Boolean, default: false },
     },
-    vehicles: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Vehicle",
-      },
-    ],
-    role: {
-      type: String,
-      enum: ["user", "admin", "tenantAdmin"],
-      default: "user",
-    },
-    tenantIds: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Tenant",
-      },
-    ],
-    status: {
-      type: String,
-      enum: ["Active", "Inactive", "Suspended"],
-      default: "Active",
-    },
+
+    /** 🔹 User Preferences */
     preferences: {
       theme: {
         type: String,
@@ -91,13 +100,11 @@ const userSchema = new mongoose.Schema(
       },
       language: { type: String, default: "en-US" },
     },
-    verification: {
-      isEmailVerified: { type: Boolean, default: false },
-      verifyEmailToken: { type: String, default: null },
-      verifyEmailExpires: { type: Date, default: null },
+    userPreferences: {
+      dashboardLayout: { type: String, default: "default" }, // Stores user’s preferred dashboard setup
     },
-    twoFactorEnabled: { type: Boolean, default: false },
-    twoFactorSecret: { type: String },
+
+    /** 🔹 Activity Tracking */
     loginHistory: [
       {
         ipAddress: { type: String },
@@ -105,29 +112,42 @@ const userSchema = new mongoose.Schema(
         device: { type: String },
       },
     ],
-    lastActivityAt: { type: Date },
+    lastLoginAt: { type: Date }, // Stores last login timestamp
+    lastActivityAt: { type: Date }, // Tracks last user activity
+
+    /** 🔹 Account Management */
+    status: {
+      type: String,
+      enum: ["Active", "Inactive", "Suspended"],
+      default: "Active",
+    },
     failedLoginAttempts: { type: Number, default: 0 },
     accountLockedUntil: { type: Date, default: null },
+
+    /** 🔹 Password Reset & Account Deletion */
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
     deletionScheduledAt: { type: Date, default: null },
+
+    /** 🔹 Audit Logs */
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     deleted: { type: Boolean, default: false },
   },
   {
-    timestamps: true,
+    timestamps: true, // Automatically adds createdAt and updatedAt fields
   }
 );
 
-// Hash the password before saving
+/** 🔹 Hash the password before saving */
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 10);
+  this.passwordUpdatedAt = new Date(); // Track password update
   next();
 });
 
-// Add method to compare passwords
+/** 🔹 Add method to compare passwords */
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };

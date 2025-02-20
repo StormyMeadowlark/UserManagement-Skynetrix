@@ -1,31 +1,85 @@
 const User = require("../models/userModel");
+const axios = require("axios");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
-const { authenticator } = require("otplib");
 const { sendEmail } = require("../utils/email");
 const { loadTemplate } = require("../utils/templateLoader");
-const { OAuth2Client } = require("google-auth-library");
+const mongoose = require("mongoose")
+
+const SHOPWARE_BASE_URL = process.env.SHOPWARE_API_URL || "";
+const SHOPWARE_X_API_PARTNER_ID = process.env.SHOPWARE_X_API_PARTNER_ID;
+const SHOPWARE_X_API_SECRET = process.env.SHOPWARE_X_API_SECRET;
+const TENANT_SERVICE_URL = process.env.TENANT_SERVICE_URL || "http://localhost:8312/api/v2/tenants";
 
 
-
-
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-
-// Register a new user
 exports.register = async (req, res) => {
-  try {
-    const { email, password, name, birthday, marketing } = req.body;
+  console.log("🔹 Incoming registration request:", req.body);
 
-    // Validate required fields
-    if (!email || !password) {
+  try {
+    const {
+      email,
+      password,
+      name,
+      phone,
+      birthday,
+      marketing,
+      businessName,
+      address,
+      city,
+      state,
+      zip,
+    } = req.body;
+
+    if (!email || !password || !phone) {
+      console.log("❌ Missing required fields:", { email, password, phone });
       return res
         .status(400)
-        .json({ message: "Email and password are required." });
+        .json({ message: "Email, password, and phone number are required." });
     }
 
-    // Check if email is already in use
+    console.log("✅ Received valid fields, proceeding...");
+
+    // Extract tenant domain from request headers
+    const domain = req.headers.origin
+      ?.replace(/^https?:\/\//, "")
+      .split("/")[0];
+    if (!domain) {
+      console.log("❌ Domain missing in headers:", req.headers);
+      return res.status(400).json({ message: "Domain is missing." });
+    }
+
+    console.log("✅ Extracted domain:", domain);
+
+    // 🔹 3. Retrieve Tenant Details
+    let tenantId, shopwareSettings, tenantZip;
+    try {
+      const tenantResponse = await axios.get(
+        `${TENANT_SERVICE_URL}/domain/${domain}`
+      );
+      if (tenantResponse.data?.success && tenantResponse.data?.tenant) {
+        tenantId = tenantResponse.data.tenant._id;
+        shopwareSettings = tenantResponse.data.tenant.shopware || {};
+        tenantZip = tenantResponse.data.tenant.mainAddress?.zip || "";
+      } else {
+        return res.status(404).json({ message: "Tenant not found." });
+      }
+    } catch (error) {
+      console.error("❌ Error retrieving tenant:", error.message);
+      return res.status(500).json({ message: "Failed to retrieve tenant." });
+    }
+
+    // 🔹 4. Normalize the phone number
+    const normalizedPhone = phone.replace(/\D/g, "");
+
+    // 🔹 5. Validate phone number format
+    if (!/^\d{10}$/.test(normalizedPhone)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid phone number format. Must be 10 digits." });
+    }
+
+    // 🔹 6. Check if the user already exists in Skynetrix
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res
@@ -33,58 +87,130 @@ exports.register = async (req, res) => {
         .json({ message: "User with this email already exists." });
     }
 
-    // Create a verification token
-    const verifyEmailToken = crypto.randomBytes(32).toString("hex");
-    const verifyEmailExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-
-    // Create the new user
+    // 🔹 7. Create User in Skynetrix First
     const user = new User({
       email,
       password,
       name,
+      phone: normalizedPhone,
       birthday,
       marketing,
+      tenantIds: [
+        mongoose.Types.ObjectId.isValid(tenantId)
+          ? new mongoose.Types.ObjectId(tenantId)
+          : null,
+      ].filter(Boolean),
+
+      shopwareUserId: null,
       verification: {
         isEmailVerified: false,
-        verifyEmailToken,
-        verifyEmailExpires,
+        verifyEmailToken: crypto.randomBytes(32).toString("hex"),
+        verifyEmailExpires: Date.now() + 24 * 60 * 60 * 1000,
       },
     });
 
-    // Save the user to the database
     await user.save();
-    console.log("User created successfully in MongoDB:", user._id);
+    console.log("✅ User created:", user._id);
 
-    // Load the email template and send verification email
+    // 🔹 8. Sync with Shopware if Enabled
+    let shopwareCustomerId = null;
+    if (shopwareSettings.enabled && shopwareSettings.tenantId) {
+      try {
+        // 🔹 8.1 Search for Existing Customer in Shopware
+        const searchResponse = await axios.get(
+          `${SHOPWARE_BASE_URL}/api/v1/tenants/${shopwareSettings.tenantId}/customers?phone_number=${normalizedPhone}`,
+          {
+            headers: {
+              "X-Api-Partner-Id": SHOPWARE_X_API_PARTNER_ID,
+              "X-Api-Secret": SHOPWARE_X_API_SECRET,
+            },
+          }
+        );
+
+        if (searchResponse.data?.data?.length) {
+          shopwareCustomerId = searchResponse.data.data[0].id;
+          console.log(
+            "✅ Existing Shopware customer found:",
+            shopwareCustomerId
+          );
+        } else {
+          // 🔹 8.2 Create New Customer in Shopware (Use `tenantZip` if `importAddress` is false)
+          const customerZip = shopwareSettings.importAddress ? zip : tenantZip;
+
+          const createResponse = await axios.post(
+            `${SHOPWARE_BASE_URL}/api/v1/tenants/${shopwareSettings.tenantId}/customers`,
+            {
+              first_name: name?.split(" ")[0] || "",
+              last_name: name?.split(" ").slice(1).join(" ") || "",
+              email,
+              phone: normalizedPhone,
+              marketing_ok: marketing || false,
+              date_of_birth: birthday || null,
+              customer_type: businessName ? "corporate" : "individual",
+              business_name: businessName || null,
+              address: shopwareSettings.importAddress ? address : undefined,
+              city: shopwareSettings.importAddress ? city : undefined,
+              state: shopwareSettings.importAddress ? state : undefined,
+              zip: customerZip,
+            },
+            {
+              headers: {
+                "X-Api-Partner-Id": SHOPWARE_X_API_PARTNER_ID,
+                "X-Api-Secret": SHOPWARE_X_API_SECRET,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (createResponse.status === 201 && createResponse.data?.id) {
+            shopwareCustomerId = createResponse.data.id;
+            console.log(
+              "✅ New Shopware customer created:",
+              shopwareCustomerId
+            );
+          }
+        }
+      } catch (error) {
+        console.error(
+          "❌ Shopware sync failed:",
+          error.response?.data || error.message
+        );
+        return res.status(500).json({ message: "Shopware API failure." });
+      }
+    }
+
+    // 🔹 9. Update User with Shopware ID
+    if (shopwareCustomerId) {
+      user.shopwareUserId = shopwareCustomerId;
+      await user.save();
+    }
+
+    // 🔹 10. Send Verification Email
     const template = loadTemplate("verify-email");
     const tenantDomain = req.headers.origin || "https://skynetrix.tech";
     const emailBody = template
       .replace("{{name}}", user.name)
       .replace(
         "{{verifyEmailLink}}",
-        `${tenantDomain}/verify-email?token=${verifyEmailToken}`
+        `${tenantDomain}/verify-email?token=${user.verification.verifyEmailToken}`
       );
-
     await sendEmail(user.email, "Verify Your Email", emailBody);
-    console.log(`Verification email sent to ${user.email}`);
+    console.log(`📩 Verification email sent to ${user.email}`);
 
-    // Return success response
+    // 🔹 11. Return Success Response
     res.status(201).json({
       message: "User registered successfully. Please verify your email.",
-      userId: user._id, // Optional: Return the new user's ID
+      userId: user._id,
+      shopwareUserId: shopwareCustomerId || null,
     });
   } catch (error) {
-    console.error("Error during registration:", error);
-
-    // If user creation was successful but email sending failed, delete the user
-    if (error.message.includes("Failed to send email")) {
-      await User.deleteOne({ email: req.body.email });
-      console.log("User deleted due to email sending failure.");
-    }
-
-    res.status(500).json({ message: "Internal server error." });
+    console.error("❌ Registration error:", error);
+    res
+      .status(500)
+      .json({ message: "Internal server error during registration." });
   }
 };
+
 
 exports.login = async (req, res) => {
   try {
@@ -251,7 +377,6 @@ exports.resendVerificationEmail = async (req, res) => {
   }
 };
 
-
 // Forgot Password
 exports.forgotPassword = async (req, res) => {
   try {
@@ -294,14 +419,15 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-
 // Reset Password
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
     if (!token || !newPassword) {
-      return res.status(400).json({ message: "Token and new password are required." });
+      return res
+        .status(400)
+        .json({ message: "Token and new password are required." });
     }
 
     const user = await User.findOne({
@@ -403,7 +529,6 @@ exports.accountRecovery = async (req, res) => {
   }
 };
 
-
 // Enable 2FA
 exports.enable2FA = async (req, res) => {
   try {
@@ -501,7 +626,6 @@ exports.socialLogin = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
-
 
 exports.disable2FA = async (req, res) => {
   try {
