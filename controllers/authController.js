@@ -10,7 +10,8 @@ const mongoose = require("mongoose")
 const SHOPWARE_BASE_URL = process.env.SHOPWARE_API_URL || "";
 const SHOPWARE_X_API_PARTNER_ID = process.env.SHOPWARE_X_API_PARTNER_ID;
 const SHOPWARE_X_API_SECRET = process.env.SHOPWARE_X_API_SECRET;
-const TENANT_SERVICE_URL = process.env.TENANT_SERVICE_URL || "http://localhost:8312/api/v2/tenants";
+const TENANT_SERVICE_URL = process.env.TENANT_SERVICE_URL || "https://localhost:8312/api/v2/tenants";
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 
 exports.register = async (req, res) => {
@@ -41,10 +42,10 @@ exports.register = async (req, res) => {
     console.log("✅ Received valid fields, proceeding...");
 
     // Extract tenant domain from request headers
-    const domain =
-    req.headers.origin?.replace(/^https?:\/\//, "").split("/")[0] ||
-    req.headers["x-tenant-domain"] || // Custom header fallback
-    "localhost";
+const domain =
+  req.headers["x-tenant-domain"] ||
+  req.headers.origin?.replace(/^https?:\/\//, "").split("/")[0];
+
   
   if (!domain) {
     return res.status(400).json({ message: "Domain is missing." });
@@ -53,15 +54,15 @@ exports.register = async (req, res) => {
     console.log("✅ Extracted domain:", domain);
 
     // 🔹 3. Retrieve Tenant Details
-    let tenantId, shopwareSettings, tenantZip;
+    let tenantId;
     try {
       const tenantResponse = await axios.get(
         `${TENANT_SERVICE_URL}/domain/${domain}`
       );
-      if (tenantResponse.data?.success && tenantResponse.data?.tenant) {
-        tenantId = tenantResponse.data.tenant._id;
-        shopwareSettings = tenantResponse.data.tenant.shopware || {};
-        tenantZip = tenantResponse.data.tenant.mainAddress?.zip || "";
+
+      if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
+        tenantId = tenantResponse.data.data.tenantId;
+        shopwareSettings = tenantResponse.data.data.shopware;
       } else {
         return res.status(404).json({ message: "Tenant not found." });
       }
