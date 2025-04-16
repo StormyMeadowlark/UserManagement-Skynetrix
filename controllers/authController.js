@@ -41,13 +41,14 @@ exports.register = async (req, res) => {
     console.log("✅ Received valid fields, proceeding...");
 
     // Extract tenant domain from request headers
-    const domain = req.headers.origin
-      ?.replace(/^https?:\/\//, "")
-      .split("/")[0];
-    if (!domain) {
-      console.log("❌ Domain missing in headers:", req.headers);
-      return res.status(400).json({ message: "Domain is missing." });
-    }
+    const domain =
+    req.headers.origin?.replace(/^https?:\/\//, "").split("/")[0] ||
+    req.headers["x-tenant-domain"] || // Custom header fallback
+    "localhost";
+  
+  if (!domain) {
+    return res.status(400).json({ message: "Domain is missing." });
+  }
 
     console.log("✅ Extracted domain:", domain);
 
