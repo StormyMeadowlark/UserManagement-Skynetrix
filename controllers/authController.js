@@ -104,8 +104,6 @@ const domain =
           ? new mongoose.Types.ObjectId(tenantId)
           : null,
       ].filter(Boolean),
-
-      shopwareUserId: null,
       verification: {
         isEmailVerified: false,
         verifyEmailToken: crypto.randomBytes(32).toString("hex"),
@@ -220,7 +218,7 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email && !password) {
+    if (!email || !password) {
       return res
         .status(400)
         .json({ message: "Email and password are required." });
@@ -242,13 +240,40 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1d",
-    });
+    const primaryTenantId = user.tenantIds?.[0];
+    if (!primaryTenantId) {
+      return res
+        .status(400)
+        .json({ message: "User is not associated with a tenant." });
+    }
+
+    // ⬇️ Make an unauthenticated call to get tenant info
+    const tenantServiceURL =
+      process.env.TENANT_SERVICE_URL || "http://localhost:2024/api/v2/tenants";
+
+    const tenantResponse = await axios.get(
+      `${tenantServiceURL}/${primaryTenantId}/public`
+    );
+    const tenant = tenantResponse.data?.data;
+
+    if (!tenant) {
+      return res.status(404).json({ message: "Associated tenant not found." });
+    }
+const token = jwt.sign(
+  {
+    id: user._id,
+    email: user.email,
+    userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+    tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
+    tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: "1d" }
+);
 
     return res.status(200).json({ message: "Login successful", token });
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Login error:", error.message);
     return res.status(500).json({ message: "Internal server error." });
   }
 };

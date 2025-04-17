@@ -59,7 +59,7 @@ const userSchema = new mongoose.Schema(
     tenantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tenant" }],
 
     /** 🔹 Shopware Integration */
-    shopwareUserId: { type: String, unique: true, sparse: true }, // Stores Shopware User ID
+    shopwareUserId: { type: String, unique: true, sparse: true, default: undefined }, // Stores Shopware User ID
     shopwareRole: { type: String }, // Role from Shopware (e.g., "shopAdmin", "serviceAdvisor")
 
     /** 🔹 Security */
