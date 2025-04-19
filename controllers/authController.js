@@ -308,12 +308,18 @@ exports.refreshToken = async (req, res) => {
         .json({ message: "Please verify your email to use this feature." });
     }
 
-    // Generate a new access token
-    const newToken = jwt.sign(
-      { id: user._id, role: user.role, tenantIds: user.tenantIds },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
+const newToken = jwt.sign(
+  {
+    id: user._id,
+    email: user.email,
+    userRole: user.role, // "admin", "tenantAdmin", etc.
+    tenantIds: user.tenantIds, // Array of ObjectIds
+    tenantId: user.tenantIds?.[0] || null, // Primary tenant for scope
+    tenantType: tenant?.type || "Unknown", // Pulled from tenant lookup
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+);
 
     res.status(200).json({
       message: "Token refreshed successfully.",
@@ -528,12 +534,10 @@ exports.changePassword = async (req, res) => {
 // Account Recovery
 exports.accountRecovery = async (req, res) => {
   try {
-    const { email, recoveryDetails } = req.body;
+    const { email } = req.body;
 
-    if (!email || !recoveryDetails) {
-      return res
-        .status(400)
-        .json({ message: "Email and recovery details are required." });
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
     }
 
     const user = await User.findOne({ email });
@@ -541,22 +545,74 @@ exports.accountRecovery = async (req, res) => {
       return res.status(404).json({ message: "User not found." });
     }
 
-    // Load and send account recovery email
-    const template = loadTemplate("account-recovery");
-    const emailBody = template
-      .replace("{{name}}", user.name)
-      .replace("{{recoveryDetails}}", recoveryDetails);
+    const { deleted, status } = user;
 
-    await sendEmail(user.email, "Account Recovery Instructions", emailBody);
+    const shouldAutoApprove =
+      (deleted && status === "Inactive") ||
+      (deleted && status === "Active") ||
+      (!deleted && status === "Inactive");
 
-    res
-      .status(200)
-      .json({ message: "Account recovery email sent successfully." });
+    if (shouldAutoApprove) {
+      const recoveryToken = crypto.randomBytes(32).toString("hex");
+
+      user.verification.verifyEmailToken = recoveryToken;
+      user.verification.verifyEmailExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+      await user.save();
+
+      const template = loadTemplate("account-recovery");
+      const recoveryLink = `${process.env.FRONTEND_URL}/account-recovery?token=${recoveryToken}`;
+
+      const emailBody = template
+        .replace("{{name}}", user.name)
+        .replace("{{recoveryLink}}", recoveryLink);
+
+      await sendEmail(user.email, "Recover Your Account", emailBody);
+
+      return res
+        .status(200)
+        .json({ message: "Account recovery email sent successfully." });
+    }
+
+    return res.status(403).json({
+      message:
+        "Your account requires manual review for recovery. Please contact support.",
+    });
   } catch (error) {
     console.error("Error in account recovery:", error);
-    res.status(500).json({ message: "Internal server error." });
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.verifyAccountRecovery = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ message: "Missing recovery token." });
+    }
+
+    const user = await User.findOne({
+      "verification.verifyEmailToken": token,
+      "verification.verifyEmailExpires": { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired token." });
+    }
+
+    // ✅ Reactivate account
+    user.deleted = false;
+    user.status = "Active";
+    user.verification.verifyEmailToken = null;
+    user.verification.verifyEmailExpires = null;
+    await user.save();
+
+    return res.status(200).json({ message: "Account successfully recovered." });
+  } catch (error) {
+    console.error("Error verifying account recovery:", error);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 
 // Enable 2FA
 exports.enable2FA = async (req, res) => {

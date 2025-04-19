@@ -57,9 +57,17 @@ const userSchema = new mongoose.Schema(
     permissions: [{ type: String }], // Stores specific permissions (e.g., "canManageCustomers", "canViewReports")
 
     tenantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tenant" }],
-
+    generalRole: {
+      type: String,
+      default: "employee", // Still gives a fallback
+    },
     /** 🔹 Shopware Integration */
-    shopwareUserId: { type: String, unique: true, sparse: true, default: undefined }, // Stores Shopware User ID
+    shopwareUserId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      default: undefined,
+    }, // Stores Shopware User ID
     shopwareRole: { type: String }, // Role from Shopware (e.g., "shopAdmin", "serviceAdvisor")
 
     /** 🔹 Security */

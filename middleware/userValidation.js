@@ -65,16 +65,15 @@ exports.authMiddleware = async (req, res, next) => {
 };
 
 exports.adminMiddleware = (req, res, next) => {
-  // Ensure user is authenticated and has a role
   if (!req.user || !req.user.role) {
     return res.status(401).json({ message: "Unauthorized access." });
   }
 
-  // Check if the user is an admin
-  if (req.user.role !== "admin") {
+  const allowedRoles = ["admin", "tenantAdmin"];
+
+  if (!allowedRoles.includes(req.user.role)) {
     return res.status(403).json({ message: "Access denied. Admins only." });
   }
 
-  // If admin, proceed to the next middleware or controller
   next();
 };

@@ -20,6 +20,7 @@ router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);
 router.post("/change-password", validateToken, authController.changePassword);
 router.post("/account-recovery", authController.accountRecovery);
+router.post("/verify-recovery", authController.verifyAccountRecovery);
 router.post("/enable-2fa", authController.enable2FA);
 router.post("/verify-2fa", authController.verify2FA);
 router.post("/disable-2fa", authController.disable2FA);
