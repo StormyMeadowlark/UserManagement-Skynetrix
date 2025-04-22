@@ -1,25 +1,30 @@
 # Use official Node.js LTS image
 FROM node:22.1.0
 
-# Create app directory
+# Set the working directory in the container
 WORKDIR /app
 
-# Install dependencies (excluding dev)
+# Copy package files
 COPY package*.json ./
-RUN npm install --omit=dev
 
-# Copy project files
+# Install all dependencies (including dev for local dev/hot reload)
+RUN npm install
+
+# Install nodemon globally for hot reload in development
+RUN npm install -g nodemon
+
+# Copy the rest of the project
 COPY . .
 
-# Create logs directory with write access
+# Create a logs directory (optional but useful)
 RUN mkdir -p /app/logs && chmod -R 777 /app/logs
 
-# Set environment vars (can be overridden at runtime)
+# Set default environment variables
 ENV PORT=5255
 ENV NODE_ENV=production
 
-# Expose internal port
+# Expose internal port for Docker networking
 EXPOSE 5255
 
-# Run the app
+# Default command (can be overridden by docker-compose)
 CMD ["npm", "start"]

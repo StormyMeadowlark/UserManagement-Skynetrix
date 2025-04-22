@@ -266,6 +266,7 @@ const token = jwt.sign(
     userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
     tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
     tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
+    tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
   },
   process.env.JWT_SECRET,
   { expiresIn: "1d" }
@@ -312,10 +313,10 @@ const newToken = jwt.sign(
   {
     id: user._id,
     email: user.email,
-    userRole: user.role, // "admin", "tenantAdmin", etc.
-    tenantIds: user.tenantIds, // Array of ObjectIds
-    tenantId: user.tenantIds?.[0] || null, // Primary tenant for scope
-    tenantType: tenant?.type || "Unknown", // Pulled from tenant lookup
+    userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+    tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
+    tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
+    tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
   },
   process.env.JWT_SECRET,
   { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }

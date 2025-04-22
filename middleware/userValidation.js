@@ -24,13 +24,13 @@ exports.validateToken = async (req, res, next) => {
 };
 
 exports.authMiddleware = async (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1]; // Extract token from "Bearer <token>"
+  const token = req.headers.authorization?.split(" ")[1];
   if (!token) {
     return res.status(401).json({ message: "Unauthorized access." });
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET); // includes tenantId, tenantType, tier, etc.
 
     let user;
     try {
@@ -39,7 +39,7 @@ exports.authMiddleware = async (req, res, next) => {
       console.error("🔥 Database error in authMiddleware:", dbError);
       return res
         .status(500)
-        .json({ message: "Authentication failed due to a database error." }); // ✅ FIX: Return 500 if DB fails
+        .json({ message: "Authentication failed due to a database error." });
     }
 
     if (!user) {
@@ -50,12 +50,16 @@ exports.authMiddleware = async (req, res, next) => {
       return res.status(403).json({ message: "Account is not active." });
     }
 
+    // ✅ Merge token info + latest DB info
     req.user = {
       id: user._id,
       email: user.email,
       role: user.role,
-      tenantIds: user.tenantIds,
-    }; // Attach user info to `req.user`
+      tenantIds: user.tenantIds, // fresh from DB
+      tenantId: decoded.tenantId, // from token
+      tenantType: decoded.tenantType, // from token
+      tier: decoded.tier || "Basic", // from token
+    };
 
     next();
   } catch (error) {
