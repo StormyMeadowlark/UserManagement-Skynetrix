@@ -184,8 +184,6 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-
-
 exports.softDeleteAccount = async (req, res) => {
   try {
     const userId = req.user.id; // Retrieved from JWT token
@@ -219,43 +217,54 @@ exports.getTenants = async (req, res) => {
   console.log("🔍 getTenants route hit");
 
   try {
-    const userId = req.user.id;
-    console.log("🔍 Fetching user:", userId);
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized request." });
+    }
 
+    console.log("🔍 Fetching user:", userId);
     const user = await User.findById(userId);
+
     if (!user) {
-      console.log("❌ User not found");
+      console.warn("❌ User not found");
       return res.status(404).json({ message: "User not found." });
     }
 
-    if (!user.tenantIds || user.tenantIds.length === 0) {
-      console.log("ℹ️ User has no tenants");
+    if (!Array.isArray(user.tenantIds) || user.tenantIds.length === 0) {
+      console.info("ℹ️ User is not associated with any tenants.");
       return res.status(200).json({ tenants: [] });
     }
 
-    console.log("🔍 Fetching tenants:", user.tenantIds);
+    console.log("🔍 Fetching tenant details via API Gateway:", user.tenantIds);
 
-    let tenantDetails = [];
     try {
       const response = await axios.post(
         `${process.env.API_GATEWAY_URL}/tenants/bulk`,
         { tenantIds: user.tenantIds },
-        { headers: { Authorization: req.headers.authorization } }
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+          },
+        }
       );
-      tenantDetails = response.data.tenants || [];
-      console.log("✅ Tenants fetched:", tenantDetails);
-    } catch (error) {
-      console.log(
-        "❌ Error fetching tenants:",
-        error.response?.data || error.message
-      );
-      return res.status(502).json({ message: "Error retrieving tenants." });
-    }
 
-    res.status(200).json({ tenants: tenantDetails });
+      const tenantDetails = response.data?.data || response.data?.tenants || [];
+
+      console.log(`✅ Retrieved ${tenantDetails.length} tenants`);
+      return res.status(200).json({ tenants: tenantDetails });
+    } catch (fetchError) {
+      console.error("❌ Error fetching tenants from API Gateway:", {
+        message: fetchError.message,
+        response: fetchError.response?.data,
+      });
+
+      return res
+        .status(fetchError.response?.status || 502)
+        .json({ message: "Failed to fetch tenant details." });
+    }
   } catch (error) {
-    console.log("❌ Internal server error:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("❌ Unexpected error in getTenants:", error);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
 
@@ -266,64 +275,51 @@ exports.associateTenant = async (req, res) => {
     const userId = req.user.id;
     const { tenantId } = req.body;
 
-    console.log("🔍 Fetching user:", userId);
-
-    // Ensure user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      console.log("❌ User not found");
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    // Validate tenantId
     if (!tenantId) {
-      console.log("❌ Missing tenantId in request body");
       return res.status(400).json({ message: "Tenant ID is required." });
     }
 
-    // Check if user is already associated with the tenant
-    if (user.tenantIds.includes(tenantId)) {
-      console.log("ℹ️ User already associated with this tenant:", tenantId);
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // Check if already associated
+    if (user.tenantIds.some((id) => id.toString() === tenantId)) {
       return res
-        .status(400)
+        .status(409)
         .json({ message: "User is already associated with this tenant." });
     }
 
-    console.log("🔍 Validating tenant existence:", tenantId);
-
-    // Validate tenant exists via API Gateway
+    // ✅ Check that tenant exists using gateway
     try {
       const response = await axios.get(
         `${process.env.API_GATEWAY_URL}/tenants/${tenantId}`,
         { headers: { Authorization: req.headers.authorization } }
       );
 
-      if (!response.data || !response.data.tenant) {
-        console.log("❌ Tenant not found:", tenantId);
+      if (!response.data?.data) {
         return res.status(404).json({ message: "Tenant not found." });
       }
     } catch (error) {
-      console.log(
+      console.error(
         "❌ Error validating tenant:",
         error.response?.data || error.message
       );
       return res.status(502).json({ message: "Error validating tenant." });
     }
 
-    // Associate tenant with user
+    // 🔐 Save association
     user.tenantIds.push(tenantId);
     await user.save();
 
     console.log("✅ Tenant associated successfully:", tenantId);
-
-    res
-      .status(200)
-      .json({
-        message: "Tenant associated successfully.",
-        tenantIds: user.tenantIds,
-      });
+    res.status(200).json({
+      message: "Tenant associated successfully.",
+      tenantIds: user.tenantIds,
+    });
   } catch (error) {
-    console.log("❌ Internal server error:", error);
+    console.error("❌ Internal server error:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -335,45 +331,36 @@ exports.removeTenantAssociation = async (req, res) => {
     const userId = req.user.id;
     const { tenantId } = req.params;
 
-    console.log("🔍 Fetching user:", userId);
-
-    // Ensure user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      console.log("❌ User not found");
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    // Validate tenantId
     if (!tenantId) {
-      console.log("❌ Missing tenantId in request params");
       return res.status(400).json({ message: "Tenant ID is required." });
     }
 
-    // Check if user is associated with the tenant
-    if (!user.tenantIds.includes(tenantId)) {
-      console.log("ℹ️ User is not associated with this tenant:", tenantId);
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    // Check if tenant is associated
+    const isAssociated = user.tenantIds.some(
+      (id) => id.toString() === tenantId
+    );
+    if (!isAssociated) {
       return res
         .status(400)
         .json({ message: "User is not associated with this tenant." });
     }
 
-    console.log("🔍 Removing tenant:", tenantId);
-
-    // Remove the tenant from the user’s tenant list
+    // Remove tenant ID from user's list
     user.tenantIds = user.tenantIds.filter((id) => id.toString() !== tenantId);
     await user.save();
 
     console.log("✅ Tenant removed successfully:", tenantId);
-
-    res
-      .status(200)
-      .json({
-        message: "Tenant removed successfully.",
-        tenantIds: user.tenantIds,
-      });
+    res.status(200).json({
+      message: "Tenant removed successfully.",
+      tenantIds: user.tenantIds,
+    });
   } catch (error) {
-    console.log("❌ Internal server error:", error);
+    console.error("❌ Internal server error:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -461,35 +448,34 @@ exports.getNotifications = async (req, res) => {
 
 exports.updateNotifications = async (req, res) => {
   try {
-    const userId = req.user.id; // Get user ID from authMiddleware
-    const { email, sms, push } = req.body;
+    const userId = req.user.id;
+    let { email, sms, push } = req.body;
 
-    // Validate input: all values must be boolean
-    if (
-      typeof email !== "boolean" ||
-      typeof sms !== "boolean" ||
-      typeof push !== "boolean"
-    ) {
-      return res.status(400).json({
-        message:
-          "Invalid notification settings. All values must be true or false.",
-      });
-    }
+    // Coerce string booleans to real booleans (e.g., from JSON or form data)
+    email = email === true || email === "true";
+    sms = sms === true || sms === "true";
+    push = push === true || push === "true";
 
-    // Update user's notification settings
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { notifications: { email, sms, push } },
-      { new: true, runValidators: true }
+      {
+        "notifications.email": email,
+        "notifications.sms": sms,
+        "notifications.push": push,
+      },
+      { new: true, runValidators: true, select: "notifications" }
     );
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found." });
     }
 
-    res.status(200).json({ notifications: updatedUser.notifications });
+    return res.status(200).json({
+      message: "Notification preferences updated successfully.",
+      notifications: updatedUser.notifications,
+    });
   } catch (error) {
-    console.error("Error updating notifications:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("❌ Error updating notifications:", error);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
