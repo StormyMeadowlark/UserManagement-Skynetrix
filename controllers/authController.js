@@ -6,6 +6,8 @@ const bcrypt = require("bcrypt");
 const { sendEmail } = require("../utils/email");
 const { loadTemplate } = require("../utils/templateLoader");
 const mongoose = require("mongoose")
+const { usageQueue, addJob } = require("../utils/bullmq");
+
 
 const SHOPWARE_BASE_URL = process.env.SHOPWARE_API_URL || "";
 const SHOPWARE_X_API_PARTNER_ID = process.env.SHOPWARE_X_API_PARTNER_ID;
@@ -16,6 +18,8 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 exports.register = async (req, res) => {
   console.log("🔹 Incoming registration request:", req.body);
+
+  let tenantId, tenantType, shopwareSettings;
 
   try {
     const {
@@ -31,6 +35,7 @@ exports.register = async (req, res) => {
       city,
       state,
       zip,
+      generalRole
     } = req.body;
 
     if (!email || !password || !phone) {
@@ -40,49 +45,42 @@ exports.register = async (req, res) => {
         .json({ message: "Email, password, and phone number are required." });
     }
 
-    console.log("✅ Received valid fields, proceeding...");
+    // Extract tenant domain
+    const domain =
+      req.headers["x-tenant-domain"] ||
+      req.headers.origin?.replace(/^https?:\/\//, "").split("/")[0];
 
-    // Extract tenant domain from request headers
-const domain =
-  req.headers["x-tenant-domain"] ||
-  req.headers.origin?.replace(/^https?:\/\//, "").split("/")[0];
-
-  
-  if (!domain) {
-    return res.status(400).json({ message: "Domain is missing." });
-  }
+    if (!domain) {
+      return res.status(400).json({ message: "Domain is missing." });
+    }
 
     console.log("✅ Extracted domain:", domain);
 
-    // 🔹 3. Retrieve Tenant Details
-    let tenantId;
-    try {
-      const tenantResponse = await axios.get(
-        `${TENANT_SERVICE_URL}/domain/${domain}`
-      );
+    // 🔹 Fetch tenant details
+    const tenantResponse = await axios.get(
+      `${TENANT_SERVICE_URL}/domain/${domain}`
+    );
+if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
+  const tenantData = tenantResponse.data.data;
 
-      if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
-        tenantId = tenantResponse.data.data.tenantId;
-        shopwareSettings = tenantResponse.data.data.shopware;
-      } else {
-        return res.status(404).json({ message: "Tenant not found." });
-      }
-    } catch (error) {
-      console.error("❌ Error retrieving tenant:", error.message);
-      return res.status(500).json({ message: "Failed to retrieve tenant." });
-    }
+  tenantId = tenantData.tenantId;
+  tier = tenantData.tier || "Basic";
+  tenantType = tenantData.tenantType || "Shop";
+  shopwareSettings = tenantData.shopware;
+} else {
+  return res.status(404).json({ message: "Tenant not found." });
+}
 
-    // 🔹 4. Normalize the phone number
+
+    // 🔹 Normalize and validate phone
     const normalizedPhone = phone.replace(/\D/g, "");
-
-    // 🔹 5. Validate phone number format
     if (!/^\d{10}$/.test(normalizedPhone)) {
       return res
         .status(400)
         .json({ message: "Invalid phone number format. Must be 10 digits." });
     }
 
-    // 🔹 6. Check if the user already exists in Skynetrix
+    // 🔹 Check for existing user
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res
@@ -90,12 +88,13 @@ const domain =
         .json({ message: "User with this email already exists." });
     }
 
-    // 🔹 7. Create User in Skynetrix First
+    // 🔹 Create user
     const user = new User({
       email,
       password,
       name,
       role,
+      generalRole,
       phone: normalizedPhone,
       birthday,
       marketing,
@@ -114,11 +113,10 @@ const domain =
     await user.save();
     console.log("✅ User created:", user._id);
 
-    // 🔹 8. Sync with Shopware if Enabled
+    // 🔹 Sync to Shopware (if applicable)
     let shopwareCustomerId = null;
-    if (shopwareSettings.enabled && shopwareSettings.tenantId) {
+    if (shopwareSettings?.enabled && shopwareSettings.tenantId) {
       try {
-        // 🔹 8.1 Search for Existing Customer in Shopware
         const searchResponse = await axios.get(
           `${SHOPWARE_BASE_URL}/api/v1/tenants/${shopwareSettings.tenantId}/customers?phone_number=${normalizedPhone}`,
           {
@@ -131,14 +129,8 @@ const domain =
 
         if (searchResponse.data?.data?.length) {
           shopwareCustomerId = searchResponse.data.data[0].id;
-          console.log(
-            "✅ Existing Shopware customer found:",
-            shopwareCustomerId
-          );
         } else {
-          // 🔹 8.2 Create New Customer in Shopware (Use `tenantZip` if `importAddress` is false)
-          const customerZip = shopwareSettings.importAddress ? zip : tenantZip;
-
+          const customerZip = shopwareSettings.importAddress ? zip : "00000"; // fallback if needed
           const createResponse = await axios.post(
             `${SHOPWARE_BASE_URL}/api/v1/tenants/${shopwareSettings.tenantId}/customers`,
             {
@@ -166,10 +158,6 @@ const domain =
 
           if (createResponse.status === 201 && createResponse.data?.id) {
             shopwareCustomerId = createResponse.data.id;
-            console.log(
-              "✅ New Shopware customer created:",
-              shopwareCustomerId
-            );
           }
         }
       } catch (error) {
@@ -181,13 +169,13 @@ const domain =
       }
     }
 
-    // 🔹 9. Update User with Shopware ID
+    // 🔹 Save Shopware ID (if applicable)
     if (shopwareCustomerId) {
       user.shopwareUserId = shopwareCustomerId;
       await user.save();
     }
 
-    // 🔹 10. Send Verification Email
+    // 🔹 Send verification email
     const template = loadTemplate("verify-email");
     const tenantDomain = req.headers.origin || "https://skynetrix.tech";
     const emailBody = template
@@ -196,10 +184,24 @@ const domain =
         "{{verifyEmailLink}}",
         `${tenantDomain}/verify-email?token=${user.verification.verifyEmailToken}`
       );
+
     await sendEmail(user.email, "Verify Your Email", emailBody);
     console.log(`📩 Verification email sent to ${user.email}`);
 
-    // 🔹 11. Return Success Response
+    // 🔹 Track usage
+    await addJob(usageQueue, {
+      tenantId,
+      tenantType,
+      userId: user._id,
+      userEmail: user.email,
+      userRole: user.role,
+      tier,
+      microservice: "user-management",
+      action: "USER_CREATED",
+      timestamp: new Date().toISOString(),
+    });
+
+    // 🔹 Success response
     res.status(201).json({
       message: "User registered successfully. Please verify your email.",
       userId: user._id,
@@ -275,7 +277,7 @@ const token = jwt.sign(
     return res.status(200).json({ message: "Login successful", token });
   } catch (error) {
     console.error("Login error:", error.message);
-    return res.status(500).json({ message: "Internal server error." });
+    return res.status(500).json({ message: error});
   }
 };
 
