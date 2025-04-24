@@ -267,6 +267,7 @@ const token = jwt.sign(
     id: user._id,
     email: user.email,
     userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+    generalRole: user.generalRole, // 👈 From User (e.g., "customer")
     tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
     tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
     tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
@@ -317,6 +318,7 @@ const newToken = jwt.sign(
     id: user._id,
     email: user.email,
     userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+    generalRole: user.generalRole, // 👈 From User (e.g., "customer")
     tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
     tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
     tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
