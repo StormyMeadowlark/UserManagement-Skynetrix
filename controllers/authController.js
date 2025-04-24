@@ -19,7 +19,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 exports.register = async (req, res) => {
   console.log("🔹 Incoming registration request:", req.body);
 
-  let tenantId, tenantType, shopwareSettings;
+  let tenantId, tenantType, tier, shopwareSettings;
 
   try {
     const {
@@ -200,6 +200,7 @@ if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
       action: "USER_CREATED",
       timestamp: new Date().toISOString(),
     });
+
 
     // 🔹 Success response
     res.status(201).json({
