@@ -5,6 +5,13 @@ const {
   authMiddleware,
   adminMiddleware,
 } = require("../middleware/userValidation");
+const validateApiKey = require("../middleware/apiKeyMiddleware")
+
+router.patch(
+  "/users/:id/status",
+  validateApiKey,
+  adminController.updateUserStatus
+);
 
 // 🏷️ Get a list of all users (Admin Only)
 
@@ -22,7 +29,7 @@ router.get(
   adminMiddleware,
   adminController.searchUsers
 );
-
+router.get("/users/internal-search", validateApiKey, adminController.searchUsersInternal);
 // 🏷️ Get details of a specific user
 router.get(
   "/users/:id",
@@ -61,6 +68,8 @@ router.put(
   adminMiddleware,
   adminController.updateUserRoles
 );
+
+
 
 /*
 // 🏷️ Tracks changes for auditing or debugging purposes

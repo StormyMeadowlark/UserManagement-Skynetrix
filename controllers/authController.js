@@ -5,16 +5,15 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { sendEmail } = require("../utils/email");
 const { loadTemplate } = require("../utils/templateLoader");
-const mongoose = require("mongoose")
+const mongoose = require("mongoose");
 const { usageQueue, addJob } = require("../utils/bullmq");
-
 
 const SHOPWARE_BASE_URL = process.env.SHOPWARE_API_URL || "";
 const SHOPWARE_X_API_PARTNER_ID = process.env.SHOPWARE_X_API_PARTNER_ID;
 const SHOPWARE_X_API_SECRET = process.env.SHOPWARE_X_API_SECRET;
-const TENANT_SERVICE_URL = process.env.TENANT_SERVICE_URL || "https://localhost:8312/api/v2/tenants";
+const TENANT_SERVICE_URL =
+  process.env.TENANT_SERVICE_URL || "https://localhost:8312/api/v2/tenants";
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 
 exports.register = async (req, res) => {
   console.log("🔹 Incoming registration request:", req.body);
@@ -35,7 +34,7 @@ exports.register = async (req, res) => {
       city,
       state,
       zip,
-      generalRole
+      generalRole,
     } = req.body;
 
     if (!email || !password || !phone) {
@@ -60,17 +59,16 @@ exports.register = async (req, res) => {
     const tenantResponse = await axios.get(
       `${TENANT_SERVICE_URL}/domain/${domain}`
     );
-if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
-  const tenantData = tenantResponse.data.data;
+    if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
+      const tenantData = tenantResponse.data.data;
 
-  tenantId = tenantData.tenantId;
-  tier = tenantData.tier || "Basic";
-  tenantType = tenantData.tenantType || "Shop";
-  shopwareSettings = tenantData.shopware;
-} else {
-  return res.status(404).json({ message: "Tenant not found." });
-}
-
+      tenantId = tenantData.tenantId;
+      tier = tenantData.tier || "Basic";
+      tenantType = tenantData.tenantType || "Shop";
+      shopwareSettings = tenantData.shopware;
+    } else {
+      return res.status(404).json({ message: "Tenant not found." });
+    }
 
     // 🔹 Normalize and validate phone
     const normalizedPhone = phone.replace(/\D/g, "");
@@ -189,18 +187,21 @@ if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
     console.log(`📩 Verification email sent to ${user.email}`);
 
     // 🔹 Track usage
-    await addJob(usageQueue, {
-      tenantId,
-      tenantType,
-      userId: user._id,
-      userEmail: user.email,
-      userRole: user.role,
-      tier,
-      microservice: "user-management",
-      action: "USER_CREATED",
-      timestamp: new Date().toISOString(),
-    });
-
+    try {
+      await addJob(usageQueue, {
+        tenantId,
+        tenantType,
+        userId: user._id,
+        userEmail: user.email,
+        userRole: user.role,
+        tier,
+        microservice: "user-management",
+        action: "USER_CREATED",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("❌ Failed to add usage event job:", error);
+    }
 
     // 🔹 Success response
     res.status(201).json({
@@ -215,7 +216,6 @@ if (tenantResponse.data?.success && tenantResponse.data?.data?.tenantId) {
       .json({ message: "Internal server error during registration." });
   }
 };
-
 
 exports.login = async (req, res) => {
   try {
@@ -258,28 +258,37 @@ exports.login = async (req, res) => {
       `${tenantServiceURL}/${primaryTenantId}/public`
     );
     const tenant = tenantResponse.data?.data;
+    user.lastLoginAt = new Date();
+    user.lastActivityAt = new Date(); // Optional but smart to track
 
+    user.loginHistory.push({
+      ipAddress: req.ip,
+      timestamp: new Date(),
+      device: req.headers["user-agent"] || "Unknown",
+    });
+
+    await user.save();
     if (!tenant) {
       return res.status(404).json({ message: "Associated tenant not found." });
     }
-const token = jwt.sign(
-  {
-    id: user._id,
-    email: user.email,
-    userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
-    generalRole: user.generalRole, // 👈 From User (e.g., "customer")
-    tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
-    tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
-    tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
-  },
-  process.env.JWT_SECRET,
-  { expiresIn: "1d" }
-);
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+        generalRole: user.generalRole, // 👈 From User (e.g., "customer")
+        tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
+        tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
+        tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
 
     return res.status(200).json({ message: "Login successful", token });
   } catch (error) {
     console.error("Login error:", error.message);
-    return res.status(500).json({ message: error});
+    return res.status(500).json({ message: error });
   }
 };
 
@@ -313,19 +322,19 @@ exports.refreshToken = async (req, res) => {
         .json({ message: "Please verify your email to use this feature." });
     }
 
-const newToken = jwt.sign(
-  {
-    id: user._id,
-    email: user.email,
-    userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
-    generalRole: user.generalRole, // 👈 From User (e.g., "customer")
-    tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
-    tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
-    tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
-  },
-  process.env.JWT_SECRET,
-  { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
-);
+    const newToken = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        userRole: user.role, // 👈 From User (e.g., "tenantAdmin")
+        generalRole: user.generalRole, // 👈 From User (e.g., "customer")
+        tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
+        tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
+        tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+    );
 
     res.status(200).json({
       message: "Token refreshed successfully.",
@@ -618,7 +627,6 @@ exports.verifyAccountRecovery = async (req, res) => {
     return res.status(500).json({ message: "Internal server error." });
   }
 };
-
 
 // Enable 2FA
 exports.enable2FA = async (req, res) => {

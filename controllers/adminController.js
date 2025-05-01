@@ -62,8 +62,10 @@ exports.searchUsers = async (req, res) => {
       id: decoded.id,
       email: decoded.email,
       userRole: decoded.userRole,
+      generalRole: decoded.generalRole,
       tenantId: decoded.tenantId,
       tenantType: decoded.tenantType,
+      tenantTier: decoded.tenantTier,
       token,
     };
 
@@ -92,6 +94,32 @@ exports.searchUsers = async (req, res) => {
     return res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.searchUsersInternal = async (req, res) => {
+   try {
+     const { tenantId, status } = req.query;
+
+     if (!tenantId) {
+       return res
+         .status(400)
+         .json({ success: false, message: "Missing tenantId" });
+     }
+
+     const filter = { tenantIds: tenantId };
+     if (status) filter.status = status;
+
+     const users = await User.find(filter, "-password");
+
+     res.status(200).json({
+       success: true,
+       message: "Users retrieved successfully.",
+       users,
+     });
+   } catch (error) {
+     console.error("❌ Error in internal user search:", error);
+     res.status(500).json({ message: "Internal server error." });
+   }
+}
 
 // ✅ Get User by ID (Admin Only)
 exports.getUserById = async (req, res) => {
@@ -407,5 +435,43 @@ exports.updateUserRoles = async (req, res) => {
   } catch (error) {
     console.error("❌ Error updating user roles:", error.message, error.stack);
     return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!["Active", "Inactive", "Suspended"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid status value. Must be 'Active', 'Inactive', or 'Suspended'.",
+      });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    user.status = status;
+    user.updatedBy = null; // optional: add context later
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `User status updated to '${status}'.`,
+    });
+  } catch (error) {
+    console.error("❌ Error in updateUserStatus:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update user status.",
+    });
   }
 };
