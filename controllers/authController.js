@@ -16,6 +16,8 @@ const TENANT_SERVICE_URL =
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 exports.register = async (req, res) => {
+
+
   console.log("🔹 Incoming registration request:", req.body);
 
   let tenantId, tenantType, tier, shopwareSettings;
@@ -35,13 +37,15 @@ exports.register = async (req, res) => {
       state,
       zip,
       generalRole,
+      wantsAccount,
+      sendInvite
     } = req.body;
 
-    if (!email || !password || !phone) {
-      console.log("❌ Missing required fields:", { email, password, phone });
+    if (!phone) {
+      console.log("❌ Missing required fields:", { phone });
       return res
         .status(400)
-        .json({ message: "Email, password, and phone number are required." });
+        .json({ message: "phone number is required." });
     }
 
     // Extract tenant domain
@@ -78,12 +82,56 @@ exports.register = async (req, res) => {
         .json({ message: "Invalid phone number format. Must be 10 digits." });
     }
 
+    let isProvisioned = !wantsAccount && !sendInvite && (!email || email.trim() === "");
+    if (wantsAccount === "true" || sendInvite === "true") {
+      isProvisioned = false;
+    } else {
+      isProvisioned = true;
+    }
+
+
     // 🔹 Check for existing user
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({
+      isProvisioned: true,
+      $or: [
+        { name: new RegExp(`^${name}$`, "i") }, // case-insensitive name match
+        { phone: phone || null },
+      ],
+    });
+
     if (existingUser) {
-      return res
-        .status(409)
-        .json({ message: "User with this email already exists." });
+      console.log("⚠️ Provisional user match found, initiating claim flow.");
+
+      return res.status(202).json({
+        message:
+          "Provisional account found. VIN verification required to claim.",
+        matchType: {
+          phone: existingUser.phone === phone,
+          name: existingUser.name?.toLowerCase() === name?.toLowerCase(),
+        },
+        provisionalUserId: existingUser._id,
+        requireVINVerification: true,
+      });
+    }
+    
+    if (email) {
+      const existing = await User.findOne({ email });
+      if (existing) {
+        return res.status(409).json({ message: "Email already exists." });
+      }
+    }
+    
+    let createdBy = null;
+
+    if (req.headers.authorization?.startsWith("Bearer ")) {
+      const token = req.headers.authorization.split(" ")[1];
+
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        createdBy = decoded.id || null;
+      } catch (err) {
+        console.warn("⚠️ Failed to decode token for createdBy:", err.message);
+      }
     }
 
     // 🔹 Create user
@@ -106,10 +154,12 @@ exports.register = async (req, res) => {
         verifyEmailToken: crypto.randomBytes(32).toString("hex"),
         verifyEmailExpires: Date.now() + 24 * 60 * 60 * 1000,
       },
+      isProvisioned,
+      createdBy, // Set the creator's ID if available
     });
-
-    await user.save();
+     await user.save();
     console.log("✅ User created:", user._id);
+    console.log("User email:", user.email)
 
     // 🔹 Sync to Shopware (if applicable)
     let shopwareCustomerId = null;
@@ -174,18 +224,23 @@ exports.register = async (req, res) => {
     }
 
     // 🔹 Send verification email
-    const template = loadTemplate("verify-email");
-    const tenantDomain = req.headers.origin || "https://skynetrix.tech";
-    const emailBody = template
-      .replace("{{name}}", user.name)
-      .replace(
-        "{{verifyEmailLink}}",
-        `${tenantDomain}/verify-email?token=${user.verification.verifyEmailToken}`
+    if (email && (wantsAccount || sendInvite)) {
+      const template = loadTemplate("verify-email");
+      const tenantDomain = req.headers.origin || "https://skynetrix.tech";
+      const emailBody = template
+        .replace("{{name}}", user.name)
+        .replace(
+          "{{verifyEmailLink}}",
+          `${tenantDomain}/verify-email?token=${user.verification.verifyEmailToken}`
+        );
+
+      await sendEmail(user.email, "Verify Your Email", emailBody);
+      console.log(`📩 Verification email sent to ${user.email}`);
+    } else {
+      console.log(
+        "📭 No verification email sent (account not requested or no email provided)."
       );
-
-    await sendEmail(user.email, "Verify Your Email", emailBody);
-    console.log(`📩 Verification email sent to ${user.email}`);
-
+    }
     // 🔹 Track usage
     try {
       await addJob(usageQueue, {
@@ -205,7 +260,7 @@ exports.register = async (req, res) => {
 
     // 🔹 Success response
     res.status(201).json({
-      message: "User registered successfully. Please verify your email.",
+      message: "User registered successfully.",
       userId: user._id,
       shopwareUserId: shopwareCustomerId || null,
     });
@@ -627,6 +682,64 @@ exports.verifyAccountRecovery = async (req, res) => {
     return res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.verifyVin = async (req, res) => {
+  try {
+    const { provisionalUserId, vin } = req.body;
+
+    if (!provisionalUserId || !vin) {
+      return res.status(400).json({ message: "Missing required fields." });
+    }
+
+    const user = await User.findById(provisionalUserId);
+
+    if (!user || !user.isProvisioned) {
+      return res.status(404).json({ message: "Provisional user not found." });
+    }
+
+    // 🔍 Fetch VINs from Vehicle service
+    const vehicleResponse = await axios.get(
+      `${process.env.VEHICLE_SERVICE_URL}/vehicles/by-user/${provisionalUserId}/vins`,
+      {
+        headers: { "x-api-key": process.env.INTERNAL_API_KEY },
+      }
+    );
+
+    const validVINs = vehicleResponse.data?.vins || [];
+    const submittedVIN = vin.trim().toUpperCase();
+    const vinMatch = validVINs.includes(submittedVIN);
+
+    if (!vinMatch) {
+      return res.status(403).json({ message: "VIN does not match records." });
+    }
+
+    // ✅ VIN verified: generate reset token
+    const token = crypto.randomBytes(32).toString("hex");
+
+    user.resetPasswordToken = token;
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+    await user.save();
+
+    return res.status(200).json({
+      message: "VIN verified. Proceed to reset password.",
+      resetToken: token,
+    });
+  } catch (error) {
+    console.error("❌ VIN verification error:", error.message);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
 
 // Enable 2FA
 exports.enable2FA = async (req, res) => {

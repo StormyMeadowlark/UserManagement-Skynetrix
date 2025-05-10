@@ -7,7 +7,9 @@ const {
   validateLogin,
   validate,
 } = require("../middleware/validation");
-router.post("/register", validateRegister, validate, authController.register);
+
+
+router.post("/register", authController.register);
 router.post("/login", validateLogin, validate, authController.login);
 router.post("/logout", authController.logout);
 router.post("/refresh-token", authController.refreshToken);
@@ -21,6 +23,11 @@ router.post("/reset-password", authController.resetPassword);
 router.post("/change-password", validateToken, authController.changePassword);
 router.post("/account-recovery", authController.accountRecovery);
 router.post("/verify-recovery", authController.verifyAccountRecovery);
+
+
+router.post("/verify-vin", authController.verifyVin)
+
+
 router.post("/enable-2fa", authController.enable2FA);
 router.post("/verify-2fa", authController.verify2FA);
 router.post("/disable-2fa", authController.disable2FA);

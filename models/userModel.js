@@ -6,17 +6,17 @@ const userSchema = new mongoose.Schema(
     /** 🔹 Basic User Info */
     email: {
       type: String,
-      required: true,
-      unique: true,
       lowercase: true,
       trim: true,
+      sparse: true,
       validate: {
         validator: function (email) {
-          return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+          return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
         },
         message: "Invalid email format",
       },
     },
+    isProvisioned: { type: Boolean, default: false },
     phone: {
       type: String,
       validate: {
@@ -71,9 +71,14 @@ const userSchema = new mongoose.Schema(
     shopwareRole: { type: String }, // Role from Shopware (e.g., "shopAdmin", "serviceAdvisor")
 
     /** 🔹 Security */
-    password: { type: String, required: true, minlength: 6 },
+    password: {
+      type: String,
+      minlength: 6,
+      required: function () {
+        return !this.isProvisioned;
+      },
+    },
     passwordUpdatedAt: { type: Date }, // Tracks last password change
-
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorMethods: [
       {
@@ -149,11 +154,22 @@ const userSchema = new mongoose.Schema(
 
 /** 🔹 Hash the password before saving */
 userSchema.pre("save", async function (next) {
+  // Only hash password if it’s modified and actually present
   if (!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 10);
-  this.passwordUpdatedAt = new Date(); // Track password update
-  next();
+
+  if (!this.password) {
+    return next(); // Skip hashing if password is empty (provisional user)
+  }
+
+  try {
+    this.password = await bcrypt.hash(this.password, 10);
+    this.passwordUpdatedAt = new Date();
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
+
 
 /** 🔹 Add method to compare passwords */
 userSchema.methods.comparePassword = async function (candidatePassword) {
