@@ -68,7 +68,7 @@ exports.register = async (req, res) => {
 
       tenantId = tenantData.tenantId;
       tier = tenantData.tier || "Basic";
-      tenantType = tenantData.tenantType || "Shop";
+      tenantType = tenantData.type || "Shop";
       shopwareSettings = tenantData.shopware;
     } else {
       return res.status(404).json({ message: "Tenant not found." });
@@ -334,7 +334,7 @@ exports.login = async (req, res) => {
         generalRole: user.generalRole, // 👈 From User (e.g., "customer")
         tenantId: primaryTenantId, // 👈 ID of the tenant they belong to
         tenantType: tenant.type, // 👈 From Tenant (e.g., "Platform Admin")
-        tenantTier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
+        tier: tenant.tier, // 👈 From Tenant (e.g., "Premium")
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
