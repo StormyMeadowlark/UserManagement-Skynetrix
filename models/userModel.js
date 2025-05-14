@@ -37,7 +37,16 @@ const userSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     birthday: { type: Date },
-
+    shopIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ShopProfile"
+      }
+    ],
+    lastVisitedShopId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ShopProfile"
+    },
     /** 🔹 Address */
     address: {
       addressLine1: { type: String },
@@ -59,7 +68,7 @@ const userSchema = new mongoose.Schema(
     tenantIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tenant" }],
     generalRole: {
       type: String,
-      default: "employee", // Still gives a fallback
+      default: "customer", // Still gives a fallback
     },
     /** 🔹 Shopware Integration */
     shopwareUserId: {
