@@ -113,6 +113,24 @@ const userSchema = new mongoose.Schema(
       push: { type: Boolean, default: false },
     },
 
+
+    shopProfiles: [
+      {
+      shopProfileId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref:"ShopProfile"
+      },
+      receiveNotifications: {
+        sms: { type: Boolean, default: false },
+        email: { type: Boolean, default: false },
+        push: { type: Boolean, default: false },
+      },
+      favorite: { type: Boolean, default: false },
+      lastVisitedAt: {  type: Date },
+      }
+    ],
+
+
     /** 🔹 User Preferences */
     preferences: {
       theme: {

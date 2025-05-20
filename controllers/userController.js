@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const axios = require("axios");
+const mongoose = require("mongoose");
 
 exports.getProfile = async (req, res) => {
   try {
@@ -477,5 +478,391 @@ exports.updateNotifications = async (req, res) => {
   } catch (error) {
     console.error("❌ Error updating notifications:", error);
     return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.getAssociateShops = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findById(userId).lean();
+
+    const shopLinks = user?.shopProfiles || [];
+    const shopIds = shopLinks
+      .map((entry) => entry.shopProfileId)
+      .filter(Boolean);
+
+    if (shopIds.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "No associated shops.", data: [] });
+    }
+
+    // 🔁 Call ShopProfile microservice to get public-facing shop data
+    const response = await axios.post(
+      `${process.env.SHOP_PROFILE_SERVICE_URL}/batch`,
+      { ids: shopIds },
+      {
+        headers: {
+          "x-api-key": process.env.INTERNAL_API_KEY,
+        },
+      }
+    );
+
+    const publicShops = response.data.data;
+    const shopMap = {};
+    publicShops.forEach((shop) => {
+      shopMap[shop._id] = shop;
+    });
+
+    // 🔗 Join public data with user-specific data
+    const result = shopLinks.map((link) => {
+      const profile = shopMap[link.shopProfileId?.toString()];
+      return {
+        shopId: link.shopProfileId,
+        favorite: link.favorite,
+        lastVisitedAt: link.lastVisitedAt,
+        receiveNotifications: link.receiveNotifications,
+        shopInfo: profile || null,
+      };
+    });
+
+    res.status(200).json({
+      message: "Associated shops retrieved successfully.",
+      data: result,
+    });
+  } catch (err) {
+    console.error("❌ Error in getAssociateShops:", err);
+    res
+      .status(500)
+      .json({ message: "Internal server error.", error: err.message });
+  }
+};
+
+exports.createAssociateShop = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { shopId } = req.params;
+    const { favorite, receiveNotifications, lastVisitedAt } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      return res.status(400).json({ message: "Invalid shop ID." });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const existingIndex = user.shopProfiles.findIndex(
+      (entry) => entry.shopProfileId.toString() === shopId
+    );
+
+    const newEntry = {
+      shopProfileId: shopId,
+      favorite: !!favorite,
+      lastVisitedAt: lastVisitedAt || new Date(),
+      receiveNotifications: {
+        sms: receiveNotifications?.sms || false,
+        email: receiveNotifications?.email || false,
+        push: receiveNotifications?.push || false,
+      },
+    };
+
+    if (existingIndex >= 0) {
+      // 🔄 Update existing association
+      user.shopProfiles[existingIndex] = {
+        ...user.shopProfiles[existingIndex]._doc,
+        ...newEntry,
+      };
+    } else {
+      // ➕ Add new association
+      user.shopProfiles.push(newEntry);
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      message: "Shop association updated.",
+      data: newEntry,
+    });
+  } catch (err) {
+    console.error("❌ Error in createAssociateShop:", err);
+    res.status(500).json({
+      message: "Failed to associate shop.",
+      error: err.message,
+    });
+  }
+};
+
+exports.removeShopAssociation = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { shopId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      return res.status(400).json({ message: "Invalid shop ID." });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const beforeCount = user.shopProfiles.length;
+
+    // Filter out the shop from the user's associations
+    user.shopProfiles = user.shopProfiles.filter(
+      (entry) => entry.shopProfileId.toString() !== shopId
+    );
+
+    if (user.shopProfiles.length === beforeCount) {
+      return res.status(404).json({ message: "Shop association not found." });
+    }
+
+    await user.save();
+
+    res.status(200).json({
+      message: "Shop association removed.",
+      remainingShops: user.shopProfiles,
+    });
+  } catch (err) {
+    console.error("❌ Error in removeShopAssociation:", err);
+    res
+      .status(500)
+      .json({ message: "Internal server error.", error: err.message });
+  }
+};
+
+exports.getAssociateShopDetails = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { shopId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      return res.status(400).json({ message: "Invalid shop ID." });
+    }
+
+    const user = await User.findById(userId).lean();
+
+    const shopLink = user?.shopProfiles.find(
+      (entry) => entry.shopProfileId.toString() === shopId
+    );
+
+    if (!shopLink) {
+      return res
+        .status(404)
+        .json({ message: "You are not associated with this shop." });
+    }
+
+    // 🔁 Get public shop info from ShopProfile service
+    const response = await axios.get(
+      `${process.env.SHOP_PROFILE_SERVICE_URL}/public/${req.user.tenantId}/${shopId}`
+    );
+
+    const publicShopData = response.data?.data;
+
+    res.status(200).json({
+      message: "Shop details retrieved.",
+      data: {
+        shopInfo: publicShopData,
+        preferences: {
+          favorite: shopLink.favorite,
+          lastVisitedAt: shopLink.lastVisitedAt,
+          receiveNotifications: shopLink.receiveNotifications,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("❌ Error in getAssociateShopDetails:", err);
+    const status = err.response?.status || 500;
+    const message = err.response?.data?.message || "Server error.";
+    res.status(status).json({ message, error: err.message });
+  }
+};
+
+
+exports.getFavoriteAssociateShops = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findById(userId).lean();
+    const shopProfiles = user?.shopProfiles || [];
+
+    // 🔍 Filter valid ObjectId + marked as favorite
+    const favorites = shopProfiles.filter(
+      (entry) =>
+        entry.favorite === true &&
+        mongoose.Types.ObjectId.isValid(entry.shopProfileId)
+    );
+
+    // 🧼 Optional: Log invalid entries
+    const invalidFavorites = shopProfiles.filter(
+      (entry) =>
+        entry.favorite === true &&
+        !mongoose.Types.ObjectId.isValid(entry.shopProfileId)
+    );
+
+    if (invalidFavorites.length > 0) {
+      console.warn(
+        "⚠️ Invalid favorite shopProfileIds skipped:",
+        invalidFavorites
+      );
+    }
+
+    // 🛑 Short-circuit if no valid favorites
+    if (favorites.length === 0) {
+      return res.status(200).json({
+        message: "No favorite shops found.",
+        data: [],
+      });
+    }
+
+    const shopIds = favorites.map((entry) => entry.shopProfileId);
+
+    // 🔁 Request shop info from ShopProfile microservice
+    const response = await axios.post(
+      `${process.env.SHOP_PROFILE_SERVICE_URL}/batch`,
+      { ids: shopIds },
+      {
+        headers: {
+          "x-api-key": process.env.INTERNAL_API_KEY,
+        },
+      }
+    );
+    const publicShops = response.data?.data || [];
+    const shopMap = {};
+    publicShops.forEach((shop) => {
+      shopMap[shop._id] = shop;
+    });
+console.log(publicShops)
+    const result = favorites.map((entry) => ({
+      shopId: entry.shopProfileId,
+      favorite: true,
+      lastVisitedAt: entry.lastVisitedAt,
+      receiveNotifications: entry.receiveNotifications,
+      shopInfo: shopMap[entry.shopProfileId.toString()] || null,
+    }));
+
+    res.status(200).json({
+      message: "Favorite shops retrieved successfully.",
+      data: result,
+    });
+  } catch (err) {
+    console.error("❌ Error in getFavoriteAssociateShops:", err);
+    res.status(500).json({
+      message: "Failed to load favorite shops.",
+      error: err.message,
+    });
+  }
+};
+
+exports.favoriteAssociateShop = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { shopId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      return res.status(400).json({ message: "Invalid shop ID." });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const profile = user.shopProfiles.find(
+      (entry) => entry.shopProfileId.toString() === shopId
+    );
+
+    if (!profile) {
+      return res
+        .status(404)
+        .json({ message: "Shop not associated with user." });
+    }
+
+    profile.favorite = true;
+
+    await user.save();
+
+    res.status(200).json({
+      message: "Shop marked as favorite successfully.",
+      data: {
+        shopProfileId: profile.shopProfileId,
+        favorite: profile.favorite,
+        lastVisitedAt: profile.lastVisitedAt,
+        receiveNotifications: profile.receiveNotifications,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Error in favoriteAssociateShop:", err);
+    res.status(500).json({
+      message: "Failed to mark shop as favorite.",
+      error: err.message,
+    });
+  }
+};
+
+exports.removeFavoriteAssociateShop = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { shopId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      return res.status(400).json({ message: "Invalid shop ID." });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    const profile = user.shopProfiles.find(
+      (entry) => entry.shopProfileId.toString() === shopId
+    );
+
+    if (!profile) {
+      return res
+        .status(404)
+        .json({ message: "Shop not associated with user." });
+    }
+
+    profile.favorite = false;
+
+    await user.save();
+
+    res.status(200).json({
+      message: "Shop removed from favorites successfully.",
+      data: {
+        shopProfileId: profile.shopProfileId,
+        favorite: profile.favorite,
+        lastVisitedAt: profile.lastVisitedAt,
+        receiveNotifications: profile.receiveNotifications,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Error in removeFavoriteAssociateShop:", err);
+    res.status(500).json({
+      message: "Failed to remove favorite shop.",
+      error: err.message,
+    });
   }
 };
