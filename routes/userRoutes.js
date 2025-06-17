@@ -3,8 +3,10 @@ const router = express.Router();
 const userController = require("../controllers/userController");
 const groupController = require("../controllers/groupController");
 const { authMiddleware } = require("../middleware/userValidation");
+const apiKeyMiddleware = require("../middleware/apiKeyMiddleware")
 
-
+router.post("/:technicianId/assign-job", apiKeyMiddleware, userController.assignJobToTechnician);
+router.post("/:technicianId/remove-job", apiKeyMiddleware, userController.removeJobFromTechnician);
 // Create a new user group
 router.post("/groups", authMiddleware, groupController.createUserGroup);
 router.get("/groups/me", authMiddleware, groupController.getMyGroups);
@@ -37,11 +39,7 @@ router.delete(
 router.get("/me/preferences", authMiddleware, userController.getPreferences);
 router.put("/me/preferences", authMiddleware, userController.updatePreferences);
 router.get("/me/notifications", authMiddleware, userController.getNotifications);
-router.put(
-  "/me/notifications",
-  authMiddleware,
-  userController.updateNotifications
-);
+router.put("me/notifications", authMiddleware, userController.updateNotifications);
 
 
 router.get("/me/shops", authMiddleware, userController.getAssociateShops)

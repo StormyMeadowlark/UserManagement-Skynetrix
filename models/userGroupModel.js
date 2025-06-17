@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
+
+
 const userGroupSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -33,8 +35,9 @@ const userGroupSchema = new mongoose.Schema({
     ref: "User",
   },
 
+
   inviteOnly: { type: Boolean, default: true }, // default behavior
-  accessCode: { type: String, required: true, select:false }, // like a join password
+  accessCode: { type: String, required: true, select: false }, // like a join password
 
   invitedUsers: [
     {
@@ -49,9 +52,9 @@ const userGroupSchema = new mongoose.Schema({
   ],
 
   isArchived: {
-  type: Boolean,
-  default: false,
-},
+    type: Boolean,
+    default: false,
+  },
 
   tags: [String],
   notes: String,
@@ -61,6 +64,7 @@ const userGroupSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
 
 // 🔍 Virtual: Pull all vehicles owned by members
 userGroupSchema.virtual("vehicles", {

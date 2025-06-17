@@ -1,6 +1,68 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
+const IncentiveSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: [
+        "Hourly Bonus", // e.g., time and a half over X hours
+        "Flat Bonus", // e.g., $100 bonus
+        "Point-Based Reward", // gamified incentives
+        "Perk", // e.g., lunch choice
+        "Other",
+      ],
+      required: true,
+    },
+    description: String,
+    triggerCondition: String, // plain-text or rule engine string, e.g., "flaggedHours > 40"
+    rewardValue: mongoose.Schema.Types.Mixed, // string, number, etc. based on type
+    recurring: { type: Boolean, default: false },
+    enabled: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
+const TechnicianProfileSchema = new mongoose.Schema(
+  {
+    certifications: [String],
+    specialties: [String],
+    hourlyRate: Number,
+    flatRate: Number,
+
+    availability: {
+      daysAvailable: [String], // e.g., ["Mon", "Tue", "Wed"]
+      hours: {
+        start: String, // "08:00"
+        end: String, // "17:00"
+      },
+    },
+
+    benefits: {
+      healthCare: { type: Boolean, default: false },
+      dental: { type: Boolean, default: false },
+      vision: { type: Boolean, default: false },
+      aflac: { type: Boolean, default: false },
+      retirement401k: { type: Boolean, default: false },
+      matching401k: { type: Number }, // % match, e.g., 5 for 5%
+    },
+
+    incentives: [IncentiveSchema],
+
+    performanceStats: {
+      flaggedHoursThisWeek: { type: Number, default: 0 },
+      totalBonusesEarned: { type: Number, default: 0 },
+      incentivePoints: { type: Number, default: 0 },
+    },
+
+    assignedJobs: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "RepairOrder.itemsSnapshop.id" },
+    ],
+  },
+);
+
+
+
 const userSchema = new mongoose.Schema(
   {
     /** 🔹 Basic User Info */
@@ -40,12 +102,12 @@ const userSchema = new mongoose.Schema(
     shopIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "ShopProfile"
-      }
+        ref: "ShopProfile",
+      },
     ],
     lastVisitedShopId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "ShopProfile"
+      ref: "ShopProfile",
     },
     /** 🔹 Address */
     address: {
@@ -70,6 +132,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "customer", // Still gives a fallback
     },
+
+    roles: [
+      {
+        type: String, // e.g., "A Tech", "Shop Foreman", "SEO Specialist"
+        primary: { type: Boolean, default: false },
+      },
+    ],
+    
     /** 🔹 Shopware Integration */
     shopwareUserId: {
       type: String,
@@ -113,23 +183,26 @@ const userSchema = new mongoose.Schema(
       push: { type: Boolean, default: false },
     },
 
-
     shopProfiles: [
       {
-      shopProfileId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref:"ShopProfile"
+        shopProfileId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "ShopProfile",
+        },
+        receiveNotifications: {
+          sms: { type: Boolean, default: false },
+          email: { type: Boolean, default: false },
+          push: { type: Boolean, default: false },
+        },
+        favorite: { type: Boolean, default: false },
+        lastVisitedAt: { type: Date },
       },
-      receiveNotifications: {
-        sms: { type: Boolean, default: false },
-        email: { type: Boolean, default: false },
-        push: { type: Boolean, default: false },
-      },
-      favorite: { type: Boolean, default: false },
-      lastVisitedAt: {  type: Date },
-      }
     ],
 
+    technicianProfile: {
+      type: TechnicianProfileSchema,
+      required: false,
+    },
 
     /** 🔹 User Preferences */
     preferences: {
@@ -154,7 +227,10 @@ const userSchema = new mongoose.Schema(
     ],
     lastLoginAt: { type: Date }, // Stores last login timestamp
     lastActivityAt: { type: Date }, // Tracks last user activity
-
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
     /** 🔹 Account Management */
     status: {
       type: String,
@@ -178,7 +254,12 @@ const userSchema = new mongoose.Schema(
     timestamps: true, // Automatically adds createdAt and updatedAt fields
   }
 );
-
+userSchema.pre("save", function (next) {
+  if (this.generalRole !== "Technician") {
+    this.technicianProfile = undefined;
+  }
+  next();
+});
 /** 🔹 Hash the password before saving */
 userSchema.pre("save", async function (next) {
   // Only hash password if it’s modified and actually present

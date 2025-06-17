@@ -446,7 +446,6 @@ exports.getNotifications = async (req, res) => {
   }
 };
 
-
 exports.updateNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -866,3 +865,90 @@ exports.removeFavoriteAssociateShop = async (req, res) => {
     });
   }
 };
+
+exports.assignJobToTechnician = async (req, res) => {
+  const { technicianId: id } = req.params;
+  const { repairOrderLineId } = req.body;
+
+  if (!id || !repairOrderLineId) {
+    return res.status(400).json({
+      success: false,
+      message: "Technician ID and Repair Order Line ID are required.",
+    });
+  }
+
+  try {
+    const user = await User.findById(id);
+
+    if (!user || user.generalRole !== "Technician") {
+      return res.status(404).json({
+        success: false,
+        message: "Technician not found or invalid role.",
+      });
+    }
+
+    if (!user.technicianProfile) {
+      user.technicianProfile = { assignedJobs: [] };
+    }
+
+    if (!user.technicianProfile.assignedJobs.includes(repairOrderLineId)) {
+      user.technicianProfile.assignedJobs.push(repairOrderLineId);
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Repair order line item assigned to technician.",
+    });
+  } catch (err) {
+    console.error("❌ Error assigning job to technician:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+    });
+  }
+};
+
+exports.removeJobFromTechnician = async (req, res) => {
+  const { technicianId } = req.params;
+  const { repairOrderLineId } = req.body;
+
+  if (!technicianId || !repairOrderLineId) {
+    return res.status(400).json({
+      success: false,
+      message: "Technician ID and Repair Order Line ID are required.",
+    });
+  }
+
+  try {
+    const user = await User.findById(technicianId);
+
+    if (!user || user.generalRole !== "Technician") {
+      return res.status(404).json({
+        success: false,
+        message: "Technician not found or invalid role.",
+      });
+    }
+
+    if (user.technicianProfile?.assignedJobs) {
+      user.technicianProfile.assignedJobs =
+        user.technicianProfile.assignedJobs.filter(
+          (id) => id.toString() !== repairOrderLineId
+        );
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Job removed from technician.",
+    });
+  } catch (err) {
+    console.error("❌ Error removing job from technician:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+    });
+  }
+};
+
+

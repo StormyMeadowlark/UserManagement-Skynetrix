@@ -223,6 +223,7 @@ exports.updateUserProfile = async (req, res) => {
       "address",
       "role",
       "generalRole",
+      "roles",
       "twoFactorEnabled",
       "twoFactorMethods",
       "marketing",
@@ -373,8 +374,6 @@ exports.getUserRoles = async (req, res) => {
     return res.status(500).json({ message: "Internal server error." });
   }
 };
-
-
 
 // ✅ Update user roles (Admin Only)
 exports.updateUserRoles = async (req, res) => {

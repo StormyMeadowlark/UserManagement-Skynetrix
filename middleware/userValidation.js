@@ -50,15 +50,23 @@ exports.authMiddleware = async (req, res, next) => {
       return res.status(403).json({ message: "Account is not active." });
     }
 
+    if (decoded.tokenVersion !== user.tokenVersion) {
+      return res.status(401).json({message: "Please login before proceeding."})
+    }
     // ✅ Merge token info + latest DB info
     req.user = {
       id: user._id,
       email: user.email,
       role: user.role,
+      generalRole: user.generalRole,
+      roles: [user.roles],
+      shop: user.shopProfiles.shopProfileId,
       tenantIds: user.tenantIds, // fresh from DB
       tenantId: decoded.tenantId, // from token
       tenantType: decoded.tenantType, // from token
       tier: decoded.tier || "Basic", // from token
+      roles: [user.roles],
+      tokenVersion: decoded.tokenVersion
     };
 
     next();
