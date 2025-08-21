@@ -10,6 +10,7 @@ const swaggerSpec = require("./config/swaggerConfig");
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const internalRoutes = require("./routes/internalRoutes");
 
 
 // Initialize Express
@@ -50,6 +51,7 @@ app.get("/health", (req, res) => {
 app.use(`${API_BASE}/admin`, adminRoutes);
 app.use(`${API_BASE}/auth`, authRoutes);
 app.use(`${API_BASE}/users`, userRoutes);
+app.use(`${API_BASE}/internal`, internalRoutes);
 
 
 

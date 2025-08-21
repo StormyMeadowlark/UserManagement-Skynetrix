@@ -31,7 +31,8 @@ exports.register = async (req, res) => {
     let {
       email,
       password,
-      name,
+      firstName,
+      lastName,
       phone,
       birthday,
       marketing,
@@ -105,13 +106,14 @@ exports.register = async (req, res) => {
 
 
     // 🔹 Check for existing user
-    const existingUser = await User.findOne({
-      isProvisioned: true,
-      $or: [
-        { name: new RegExp(`^${name}$`, "i") }, // case-insensitive name match
-        { phone: phone || null },
-      ],
-    });
+const existingUser = await User.findOne({
+  isProvisioned: true,
+  $and: [
+    { firstName: firstName },
+    { lastName: lastName },
+    { phone: phone || null },
+  ],
+});
 
     if (existingUser) {
       console.log("⚠️ Provisional user match found, initiating claim flow.");
@@ -157,7 +159,8 @@ exports.register = async (req, res) => {
     const user = new User({
       email,
       password,
-      name,
+      firstName,
+      lastName,
       role,
       generalRole,
       phone: normalizedPhone,
@@ -204,8 +207,8 @@ exports.register = async (req, res) => {
           const createResponse = await axios.post(
             `${SHOPWARE_BASE_URL}/api/v1/tenants/${shopwareSettings.tenantId}/customers`,
             {
-              first_name: name?.split(" ")[0] || "",
-              last_name: name?.split(" ").slice(1).join(" ") || "",
+              first_name: firstName,
+              last_name: lastName,
               email,
               phone: normalizedPhone,
               marketing_ok: marketing || false,
@@ -248,7 +251,7 @@ exports.register = async (req, res) => {
     // 🔹 Send verification email
     if (email && (wantsAccount || sendInvite)) {
       const template = loadTemplate("verify-email");
-      const tenantDomain = req.headers.origin || "https://skynetrix.tech";
+      const tenantDomain = req.headers.domain|| "https://skynetrix.tech";
       const emailBody = template
         .replace("{{name}}", user.name)
         .replace(
@@ -282,9 +285,9 @@ exports.register = async (req, res) => {
 
     // 🔹 Success response
     res.status(201).json({
+      success: true,
       message: "User registered successfully.",
       userId: user._id,
-      shopwareUserId: shopwareCustomerId || null,
     });
   } catch (error) {
     console.error("❌ Registration error:", error);

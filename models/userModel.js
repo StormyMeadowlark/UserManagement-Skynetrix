@@ -97,7 +97,8 @@ const userSchema = new mongoose.Schema(
         message: "Invalid secondary phone number format",
       },
     },
-    name: { type: String, required: true, trim: true },
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
     birthday: { type: Date },
     shopIds: [
       {
@@ -139,7 +140,19 @@ const userSchema = new mongoose.Schema(
         primary: { type: Boolean, default: false },
       },
     ],
-    
+    stripeCustomerId: { type: String, required: false },
+    paymentMethods: [
+      {
+        stripePaymentMethodId: { type: String, required: true }, // e.g., pm_123
+        brand: String, // e.g., 'visa'
+        last4: String, // e.g., '4242'
+        expMonth: Number, // e.g., 12
+        expYear: Number, // e.g., 2026
+        fingerprint: String, // Optional: dedupe logic
+        isFavorite: { type: Boolean, default: false },
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
     /** 🔹 Shopware Integration */
     shopwareUserId: {
       type: String,
@@ -251,7 +264,9 @@ const userSchema = new mongoose.Schema(
     deleted: { type: Boolean, default: false },
   },
   {
-    timestamps: true, // Automatically adds createdAt and updatedAt fields
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }, // Automatically adds createdAt and updatedAt fields
   }
 );
 userSchema.pre("save", function (next) {
@@ -283,5 +298,11 @@ userSchema.pre("save", async function (next) {
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
+
+
+userSchema.virtual("name").get(function () {
+  return `${this.firstName} ${this.lastName}`;
+});
+
 
 module.exports = mongoose.model("User", userSchema);
